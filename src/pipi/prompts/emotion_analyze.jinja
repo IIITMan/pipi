@@ -1,0 +1,13 @@
+分析用户这句话包含的情绪信号。只输出 JSON，不要解释。
+
+用户说：{{user_text}}
+语音情感标签：{{asr_emotion}}
+{{vision_info}}
+
+输出格式：
+{"valence": 0.0, "arousal": 0.0, "is_negative": false, "is_positive": false, "signals": ["关键词"], "needs_comfort": false}
+
+说明：
+- valence  情绪效价，-1（非常负面）到 1（非常正面）
+- arousal  唤醒度，0（平静）到 1（激动）
+- needs_comfort 是否需要在回复时先安抚情绪

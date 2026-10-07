@@ -1,0 +1,20 @@
+你是一个信息抽取器。从下面这段对话中，挑出**值得长期记住**的信息。
+
+只记具体、以后有用的事实。不要记寒暄、客套、语气词。
+如果没有任何值得记的，返回空数组 []。
+
+判断类型：
+- identity   身份（名字/城市/职业/居住）→ importance 0.9~1.0
+- commitment 约定/承诺（答应过的事）→ importance 0.9
+- preference 喜好厌恶（喜欢什么/讨厌什么）→ importance 0.7~0.8
+- relation   人际关系、养了什么宠物、提到谁 → importance 0.6
+- event      将来或过去的具体事件（面试/出差/生日）→ importance 0.6~0.75
+- emotion    强烈的情感印记 → importance 0.5
+- chitchat   一般闲聊 → importance 不要超过 0.3
+
+对话内容：
+用户说：{{user_text}}
+皮皮回：{{reply_text}}
+
+只输出 JSON 数组，不要任何解释、不要 markdown 代码块：
+[{"type":"identity","content":"他叫阿哲","importance":0.98,"pinned":true}]

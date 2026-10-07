@@ -1,0 +1,52 @@
+# ============================================================
+# 降级策略矩阵
+# ============================================================
+# 每个能力给一条优先级链，运行期挑第一个"可用"的。
+# 启动时做一次自检，运行中失败会熔断该 provider 一段时间。
+# 目的：**保证任何环境都能跑通** —— 哪怕没有 GPU、没有摄像头、没有网络。
+# ============================================================
+
+capabilities:
+
+  # 语音识别：本地 → 云 → 键盘输入
+  asr:
+    chain: ["sensevoice", "cloud_dashscope", "mock"]
+    description: "SenseVoice 本地推理不可用时退到云 API，最后退到键盘输入"
+
+  # 语音合成：本地 → 免费的 edge-tts → 云 → 只打印
+  tts:
+    chain: ["cosyvoice", "edge_tts", "cloud_openai", "mock"]
+    description: "无 GPU 时 edge-tts 是最佳性价比兜底"
+
+  # 大模型：主云端 → 备用云 API → 规则回复（纯云端方案，不做本地部署）
+  #
+  # ★ 为什么不塞一层本地模型（见 docs/LLM_SELECTION.md §4）：
+  #   皮皮的算力预算全给了视觉与 ROS2，本地跑 3B 会和视觉抢 CPU，
+  #   换来的只是"笨一点的闲聊"。而云端 Flash 档实测 ¥0.15/千轮，
+  #   成本根本不是约束 —— 与其维护一套双轨推理环境，不如把云端接稳。
+  #
+  # ★ 两家不同厂商是刻意的：单一厂商故障/限流时不至于全灭。
+  #   qwen（阿里百炼）与 deepseek（深度求索）物理隔离，互为灾备。
+  llm:
+    chain: ["doubao", "deepseek", "mock"]
+    description: "两家云端厂商互为灾备，全挂才退规则回复（保持基本陪伴）"
+
+  # 视觉：完整 pipeline → 只检测 → 关闭
+  vision:
+    chain: ["full", "detect_only", "mock"]
+    description: "InsightFace 装不上就只认'有人/没人'，仍能触发主动搭话"
+
+  # 向量检索：本地 bge → TF-IDF
+  embedding:
+    chain: ["bge_small", "tfidf"]
+    description: "没有 embedding 模型时自动降级为关键词匹配，接口不变"
+
+  # 运动控制：轮趣 C30D 实机（ROS2 话题）→ 纯日志
+  motion:
+    chain: ["wheeltec", "mock"]
+
+# 运行期熔断参数
+circuit_breaker:
+  failure_threshold: 3          # 连续失败几次后熔断
+  recovery_timeout_s: 60        # 熔断多久后半开重试
+  on_failure_message: "（皮皮卡了一下……你说啥？）"

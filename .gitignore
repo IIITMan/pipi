@@ -1,0 +1,83 @@
+# ---------------- Python ----------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# ---------------- 虚拟环境 ----------------
+.venv/
+venv/
+env/
+ENV/
+.python-version
+
+# ---------------- 测试 / 缓存 ----------------
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+
+# ---------------- 运行时数据（重要：绝不入库）----------------
+# 数据库里是真实用户档案与记忆，属于隐私数据
+data/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# 下载的模型（体积大）
+models/
+*.onnx
+*.pt
+*.pth
+*.bin
+*.safetensors
+
+# 人脸底片（生物特征，绝对不入库）
+faces/
+*.face
+
+# 会话导出 / 回放产物
+*.session.json
+replay_out/
+out.json
+
+# ---------------- 密钥与环境 ----------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets.yaml
+configs/local.yaml
+
+# ---------------- 日志 ----------------
+*.log
+logs/
+
+# ---------------- 音频产物 ----------------
+*.wav
+*.mp3
+*.pcm
+!tests/fixtures/*.wav
+
+# ---------------- 编辑器 / 系统 ----------------
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ---------------- 仓库导出产物 ----------------
+*.bundle
+*.zip

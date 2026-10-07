@@ -1,0 +1,925 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>皮皮 · 底盘示意图与电池建议报告</title>
+<style>
+  :root{
+    --bg:#ffffff; --bg2:#f7f8fa; --bg3:#eef1f5;
+    --tx:#1a1d21; --tx2:#5a6472; --tx3:#8a94a3;
+    --bd:#dfe4ea; --bd2:#c7ced8;
+    --red:#c0392b; --blue:#2471a3; --green:#1e8449; --amber:#b9770e;
+    --accent:#2c5f8a;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg2); color:var(--tx);
+    font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+    line-height:1.7; -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1080px; margin:0 auto; background:var(--bg); padding:48px 56px 64px;
+        box-shadow:0 1px 24px rgba(0,0,0,.06); min-height:100vh}
+  header{border-bottom:3px solid var(--accent); padding-bottom:22px; margin-bottom:36px}
+  h1{margin:0 0 8px; font-size:27px; letter-spacing:-.3px}
+  .sub{color:var(--tx2); font-size:14px; margin:0}
+  .meta{margin-top:14px; font-size:12.5px; color:var(--tx3)}
+  h2{font-size:19px; margin:44px 0 16px; padding-left:12px; border-left:4px solid var(--accent)}
+  h3{font-size:15.5px; margin:28px 0 10px; color:var(--tx)}
+  p{margin:10px 0}
+  table{width:100%; border-collapse:collapse; margin:16px 0; font-size:13.5px}
+  th,td{padding:9px 11px; border-bottom:1px solid var(--bd); text-align:left; vertical-align:top}
+  th{background:var(--bg3); font-weight:600; font-size:12.5px; color:var(--tx2);
+     text-transform:uppercase; letter-spacing:.4px}
+  tr:last-child td{border-bottom:none}
+  td.num{text-align:right; font-variant-numeric:tabular-nums}
+  .best{background:#f0f8f2}
+  .best td{font-weight:600}
+  code{background:var(--bg3); padding:2px 6px; border-radius:4px; font-size:12.5px;
+       font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .box{background:var(--bg2); border:1px solid var(--bd); border-left:4px solid var(--accent);
+       border-radius:0 6px 6px 0; padding:14px 18px; margin:18px 0; font-size:13.5px}
+  .box.warn{border-left-color:var(--amber); background:#fdf8ee}
+  .box.good{border-left-color:var(--green); background:#f2f9f4}
+  .box.bad{border-left-color:var(--red); background:#fcf2f1}
+  .box b{color:var(--tx)}
+  .kv{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin:18px 0}
+  .kv .cell{background:var(--bg2); border:1px solid var(--bd); border-radius:8px; padding:13px 15px}
+  .kv .k{font-size:11.5px; color:var(--tx3); letter-spacing:.4px; text-transform:uppercase}
+  .kv .v{font-size:20px; font-weight:700; margin-top:3px; font-variant-numeric:tabular-nums}
+  .kv .u{font-size:12px; color:var(--tx2); font-weight:400; margin-left:3px}
+  figure{margin:22px 0; text-align:center}
+  figure svg{max-width:100%; height:auto; background:var(--bg2);
+             border:1px solid var(--bd); border-radius:10px; padding:8px}
+  figcaption{font-size:12.5px; color:var(--tx3); margin-top:9px}
+  .pill{display:inline-block; padding:2px 9px; border-radius:20px; font-size:11.5px;
+        font-weight:600; vertical-align:middle}
+  .pill.rec{background:#e3f2e8; color:var(--green)}
+  .pill.no{background:#fbe8e6; color:var(--red)}
+  .pill.mid{background:#fdf3e0; color:var(--amber)}
+  ul,ol{padding-left:22px; margin:10px 0}
+  li{margin:6px 0}
+  footer{margin-top:56px; padding-top:20px; border-top:1px solid var(--bd);
+         font-size:12px; color:var(--tx3)}
+  .toc{background:var(--bg2); border:1px solid var(--bd); border-radius:8px; padding:16px 22px; margin:26px 0}
+  .toc ol{margin:0; padding-left:20px; font-size:13.5px}
+  .toc a{color:var(--accent); text-decoration:none}
+  .toc a:hover{text-decoration:underline}
+  @media(max-width:720px){
+    .wrap{padding:28px 20px 44px}
+    h1{font-size:22px}
+    table{font-size:12.5px}
+    th,td{padding:7px 8px}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>皮皮 · 底盘示意图与电池建议报告</h1>
+  <p class="sub">真·十字形麦轮底盘（Ø300 mm 外接圆）· 动力电池选型决策</p>
+  <div class="meta">2026-10-05 ｜ 配套 <code>CHASSIS.md</code> · <code>hardware/chassis.scad</code></div>
+</header>
+
+<div class="toc">
+  <ol>
+    <li><a href="#s1">底盘示意图（俯视 / 侧视）</a></li>
+    <li><a href="#s2">整车关键参数</a></li>
+    <li><a href="#s3">电池需求推导</a></li>
+    <li><a href="#s4">五套电池方案对照</a></li>
+    <li><a href="#s5">推荐结论与理由</a></li>
+    <li><a href="#s6">采购与使用要点</a></li>
+    <li><a href="#s7">自动回充与充电桩</a></li>
+    <li><a href="#s8">无线充电可行性判断</a></li>
+  </ol>
+</div>
+
+<!-- ============ 1 ============ -->
+<h2 id="s1">1. 底盘示意图</h2>
+
+<figure>
+<svg viewBox="0 0 680 520" xmlns="http://www.w3.org/2000/svg"
+     font-family="system-ui,-apple-system,'PingFang SC','Microsoft YaHei',sans-serif">
+  <defs>
+    <marker id="a1" markerWidth="9" markerHeight="9" refX="6.5" refY="3" orient="auto">
+      <path d="M0,0 L7,3 L0,6 z" fill="#5a6472"/>
+    </marker>
+    <marker id="a2" markerWidth="9" markerHeight="9" refX="6.5" refY="3" orient="auto">
+      <path d="M0,0 L7,3 L0,6 z" fill="#1e8449"/>
+    </marker>
+  </defs>
+
+  <text x="340" y="24" text-anchor="middle" font-size="15" font-weight="700" fill="#1a1d21">俯视 · 十字形轮位布局</text>
+  <text x="340" y="43" text-anchor="middle" font-size="11" fill="#8a94a3">4 轮 90° 均布于四条臂末端 ｜ 相邻轮轴心距 = 240/√2 = 169.7 mm</text>
+
+  <!-- 外接圆 -->
+  <circle cx="340" cy="280" r="120" fill="none" stroke="#c7ced8" stroke-width="1" stroke-dasharray="5 4"/>
+  <text x="340" y="172" text-anchor="middle" font-size="9.5" fill="#8a94a3">Ø300 外接圆</text>
+
+  <!-- 十字底板 -->
+  <rect x="311" y="160" width="58" height="120" rx="5" fill="#eef1f5" stroke="#5a6472" stroke-width="1.6"/>
+  <rect x="311" y="280" width="58" height="120" rx="5" fill="#eef1f5" stroke="#5a6472" stroke-width="1.6"/>
+  <rect x="200" y="251" width="120" height="58" rx="5" fill="#eef1f5" stroke="#5a6472" stroke-width="1.6"/>
+  <rect x="360" y="251" width="120" height="58" rx="5" fill="#eef1f5" stroke="#5a6472" stroke-width="1.6"/>
+
+  <!-- 枢纽 -->
+  <circle cx="340" cy="280" r="41" fill="#dfe4ea" stroke="#5a6472" stroke-width="1.6"/>
+  <circle cx="340" cy="280" r="21" fill="#fff" stroke="#c7ced8" stroke-width="1"/>
+  <text x="340" y="277" text-anchor="middle" font-size="9" fill="#5a6472">枢纽</text>
+  <text x="340" y="288" text-anchor="middle" font-size="8" fill="#8a94a3">r=62</text>
+
+  <!-- 麦轮 -->
+  <g text-anchor="middle" font-weight="700" font-size="13">
+    <g transform="translate(340,160)">
+      <circle r="30" fill="#fff" stroke="#c0392b" stroke-width="2.6"/>
+      <line x1="-19" y1="-19" x2="19" y2="19" stroke="#c0392b" stroke-width="2"/>
+      <line x1="-19" y1="19" x2="19" y2="-19" stroke="#c0392b" stroke-width="2"/>
+      <text y="5" fill="#c0392b">L</text>
+    </g>
+    <g transform="translate(340,400)">
+      <circle r="30" fill="#fff" stroke="#c0392b" stroke-width="2.6"/>
+      <line x1="-19" y1="-19" x2="19" y2="19" stroke="#c0392b" stroke-width="2"/>
+      <line x1="-19" y1="19" x2="19" y2="-19" stroke="#c0392b" stroke-width="2"/>
+      <text y="5" fill="#c0392b">L</text>
+    </g>
+    <g transform="translate(200,280)">
+      <circle r="30" fill="#fff" stroke="#2471a3" stroke-width="2.6"/>
+      <line x1="-19" y1="-19" x2="19" y2="19" stroke="#2471a3" stroke-width="2"/>
+      <line x1="-19" y1="19" x2="19" y2="-19" stroke="#2471a3" stroke-width="2"/>
+      <text y="5" fill="#2471a3">R</text>
+    </g>
+    <g transform="translate(480,280)">
+      <circle r="30" fill="#fff" stroke="#2471a3" stroke-width="2.6"/>
+      <line x1="-19" y1="-19" x2="19" y2="19" stroke="#2471a3" stroke-width="2"/>
+      <line x1="-19" y1="19" x2="19" y2="-19" stroke="#2471a3" stroke-width="2"/>
+      <text y="5" fill="#2471a3">R</text>
+    </g>
+  </g>
+
+  <!-- 相邻轮轴心距 -->
+  <line x1="340" y1="160" x2="480" y2="280" stroke="#1e8449" stroke-width="1.5" stroke-dasharray="6 4"/>
+  <text x="437" y="216" text-anchor="middle" font-size="9.5" fill="#1e8449" font-weight="600">169.7 mm</text>
+
+  <!-- 90 度 -->
+  <path d="M356,160 A 16 16 0 0 1 340,176" fill="none" stroke="#1e8449" stroke-width="1.3"/>
+  <text x="362" y="178" font-size="9" fill="#1e8449">90°</text>
+
+  <!-- 车头 -->
+  <line x1="340" y1="112" x2="340" y2="88" stroke="#5a6472" stroke-width="1.6" marker-end="url(#a1)"/>
+  <text x="340" y="81" text-anchor="middle" font-size="10" fill="#5a6472">车头</text>
+
+  <!-- 轮距标注 -->
+  <line x1="200" y1="452" x2="480" y2="452" stroke="#5a6472" stroke-width="1" marker-start="url(#a1)" marker-end="url(#a1)"/>
+  <text x="340" y="468" text-anchor="middle" font-size="10" fill="#5a6472">轮距 track = 240 mm</text>
+  <line x1="200" y1="280" x2="200" y2="452" stroke="#c7ced8" stroke-width=".9" stroke-dasharray="3 3"/>
+  <line x1="480" y1="280" x2="480" y2="452" stroke="#c7ced8" stroke-width=".9" stroke-dasharray="3 3"/>
+
+  <!-- 图例 -->
+  <g transform="translate(24,438)">
+    <rect x="0" y="0" width="150" height="74" rx="7" fill="#f7f8fa" stroke="#dfe4ea"/>
+    <text x="11" y="18" font-size="10" font-weight="700" fill="#1a1d21">麦轮手性 · 必须 2L+2R</text>
+    <circle cx="18" cy="34" r="5.5" fill="none" stroke="#c0392b" stroke-width="2"/>
+    <text x="30" y="38" font-size="9.5" fill="#5a6472">L 左旋 → 前 / 后</text>
+    <circle cx="18" cy="54" r="5.5" fill="none" stroke="#2471a3" stroke-width="2"/>
+    <text x="30" y="58" font-size="9.5" fill="#5a6472">R 右旋 → 左 / 右</text>
+  </g>
+</svg>
+<figcaption>图 1 ｜ 俯视布局：4 个麦轮位于十字四臂末端，对角同向（前↔后 = L，左↔右 = R），构成 X 型。</figcaption>
+</figure>
+
+<figure>
+<svg viewBox="0 0 680 400" xmlns="http://www.w3.org/2000/svg"
+     font-family="system-ui,-apple-system,'PingFang SC','Microsoft YaHei',sans-serif">
+  <defs>
+    <marker id="a3" markerWidth="9" markerHeight="9" refX="6.5" refY="3" orient="auto">
+      <path d="M0,0 L7,3 L0,6 z" fill="#5a6472"/>
+    </marker>
+  </defs>
+
+  <text x="340" y="24" text-anchor="middle" font-size="15" font-weight="700" fill="#1a1d21">侧视 · 四层堆叠与重心</text>
+  <text x="340" y="43" text-anchor="middle" font-size="11" fill="#8a94a3">电池下挂于底板正下方 ｜ 重心离地 55.2 mm</text>
+
+  <!-- 四层 -->
+  <rect x="200" y="70" width="200" height="52" rx="4" fill="#e8eef5" stroke="#5a6472" stroke-width="1.4"/>
+  <text x="300" y="92" text-anchor="middle" font-size="11.5" fill="#1a1d21" font-weight="600">L4 头部</text>
+  <text x="300" y="109" text-anchor="middle" font-size="9.5" fill="#5a6472">外壳 + 摄像头 + 麦阵 + 灯带 (0.15kg)</text>
+
+  <rect x="200" y="126" width="200" height="46" rx="4" fill="#e8eef5" stroke="#5a6472" stroke-width="1.4"/>
+  <text x="300" y="146" text-anchor="middle" font-size="11.5" fill="#1a1d21" font-weight="600">L4 云台</text>
+  <text x="300" y="162" text-anchor="middle" font-size="9.5" fill="#5a6472">支架 + 2×MG996R (0.20kg)</text>
+
+  <rect x="200" y="176" width="200" height="58" rx="4" fill="#dde5ee" stroke="#5a6472" stroke-width="1.4"/>
+  <text x="300" y="199" text-anchor="middle" font-size="11.5" fill="#1a1d21" font-weight="600">L3 主控</text>
+  <text x="300" y="216" text-anchor="middle" font-size="9.5" fill="#5a6472">N100 无风扇工控机 (0.55kg)</text>
+
+  <rect x="200" y="238" width="200" height="44" rx="4" fill="#dde5ee" stroke="#5a6472" stroke-width="1.4"/>
+  <text x="300" y="257" text-anchor="middle" font-size="11.5" fill="#1a1d21" font-weight="600">L2 电控</text>
+  <text x="300" y="273" text-anchor="middle" font-size="9.5" fill="#5a6472">C30D + DC-DC (0.16kg)</text>
+
+  <!-- 底板 -->
+  <rect x="140" y="286" width="320" height="12" rx="2" fill="#8a94a3" stroke="#5a6472" stroke-width="1.4"/>
+  <text x="474" y="296" font-size="10" fill="#5a6472">十字底板 4mm</text>
+
+  <!-- 电池下挂 -->
+  <rect x="232" y="300" width="136" height="42" rx="4" fill="#cfe0f0" stroke="#2471a3" stroke-width="1.8"/>
+  <text x="300" y="319" text-anchor="middle" font-size="11" font-weight="700" fill="#1a4c73">18650 3S2P 7.0Ah</text>
+  <text x="300" y="334" text-anchor="middle" font-size="9.5" fill="#2471a3">0.34kg · 45×73×65 mm</text>
+
+  <!-- 轮子与地面 -->
+  <circle cx="185" cy="342" r="14" fill="#fff" stroke="#c0392b" stroke-width="2.4"/>
+  <circle cx="415" cy="342" r="14" fill="#fff" stroke="#2471a3" stroke-width="2.4"/>
+  <line x1="120" y1="356" x2="480" y2="356" stroke="#5a6472" stroke-width="2"/>
+  <text x="300" y="374" text-anchor="middle" font-size="10" fill="#5a6472">地面</text>
+
+  <!-- 重心标记 -->
+  <line x1="300" y1="356" x2="300" y2="274" stroke="#c0392b" stroke-width="1.4" stroke-dasharray="5 3" marker-end="url(#a3)"/>
+  <circle cx="300" cy="274" r="4.5" fill="#c0392b"/>
+  <line x1="300" y1="274" x2="500" y2="274" stroke="#c0392b" stroke-width="1" stroke-dasharray="3 2"/>
+  <text x="506" y="278" font-size="10" font-weight="700" fill="#c0392b">重心 h=55.2 mm</text>
+
+  <!-- 高度标注 -->
+  <line x1="612" y1="356" x2="612" y2="70" stroke="#c7ced8" stroke-width="1" marker-start="url(#a3)" marker-end="url(#a3)"/>
+  <text x="620" y="220" font-size="10" fill="#5a6472" transform="rotate(90 620 220)">整车高 ≈ 220 mm</text>
+
+  <!-- 侧翻提示 -->
+  <path d="M150,300 L120,300" stroke="#1e8449" stroke-width="1.4" marker-end="url(#a3)"/>
+  <text x="30" y="288" font-size="9.5" fill="#1e8449">轮距 240mm</text>
+  <text x="30" y="302" font-size="9.5" fill="#1e8449">侧翻裕度 21.4×</text>
+</svg>
+<figcaption>图 2 ｜ 侧视分层：电池（0.34 kg）挂在底板正下方，是压低重心的关键设计——若改为上置，重心会从 55.2 mm 抬到约 68 mm。</figcaption>
+</figure>
+
+<div class="box good">
+  <b>为什么电池要下挂？</b>皮皮总重 3.29 kg，其中电池占 0.34 kg 且是唯一可以自由挪位置的重量块。
+  放在底板下方（z = −18 mm 而非 +20 mm）让整车重心从 68 mm 压到 <b>55.2 mm</b>，
+  侧翻临界加速度从约 17.3 m/s² 提到 <b>21.4 m/s²</b>。<b>代价为零，收益是麦轮急停/急转时的稳定裕度。</b>
+</div>
+
+<!-- ============ 2 ============ -->
+<h2 id="s2">2. 整车关键参数</h2>
+
+<div class="kv">
+  <div class="cell"><div class="k">轮距 × 轴距</div><div class="v">240<span class="u">×240 mm</span></div></div>
+  <div class="cell"><div class="k">车体外接圆</div><div class="v">Ø300<span class="u">mm</span></div></div>
+  <div class="cell"><div class="k">麦轮直径</div><div class="v">60<span class="u">mm</span></div></div>
+  <div class="cell"><div class="k">整机重量</div><div class="v">3.29<span class="u">kg</span></div></div>
+  <div class="cell"><div class="k">重心离地</div><div class="v">55.2<span class="u">mm</span></div></div>
+  <div class="cell"><div class="k">侧翻裕度</div><div class="v">21.4<span class="u">×</span></div></div>
+  <div class="cell"><div class="k">典型电流</div><div class="v">2.40<span class="u">A</span></div></div>
+  <div class="cell"><div class="k">峰值电流</div><div class="v">4.25<span class="u">A</span></div></div>
+</div>
+
+<table>
+  <thead><tr><th>驱动需求</th><th class="num">数值</th><th>说明</th></tr></thead>
+  <tbody>
+    <tr><td>单轮需求扭矩</td><td class="num">0.201 kg·cm</td><td>加速 0.8 m/s²、轮半径 30 mm</td></tr>
+    <tr><td>MG513 额定扭矩</td><td class="num">2.0 kg·cm</td><td>余量 <b>9.9×</b></td></tr>
+    <tr><td>MG513 堵转扭矩</td><td class="num">9.0 kg·cm</td><td>余量 44.7×</td></tr>
+    <tr><td>最高轮速（0.5 m/s）</td><td class="num">159 RPM</td><td>远低于电机空载转速</td></tr>
+  </tbody>
+</table>
+
+<!-- ============ 3 ============ -->
+<h2 id="s3">3. 电池需求推导</h2>
+
+<p>底盘电池要同时满足三个硬约束，缺一不可：</p>
+
+<table>
+  <thead><tr><th>约束</th><th>需求</th><th>由来</th></tr></thead>
+  <tbody>
+    <tr><td><b>电压</b></td><td>3S（11.1 V 标称 / 12.6 V 满）</td><td>C30D 原生 12 V 输入；4S 会超压烧板，2S 转速不够</td></tr>
+    <tr><td><b>持续电流</b></td><td>≥ 4.25 A</td><td>4 个 MG513 同时堵转的峰值；典型工况仅 2.40 A</td></tr>
+    <tr><td><b>仓体空间</b></td><td>≤ 124 mm 圆、高 ≤ 40 mm</td><td>必须塞进中心枢纽（r = 62 mm）的投影内</td></tr>
+  </tbody>
+</table>
+
+<h3>3.1 电流预算明细</h3>
+
+<table>
+  <thead><tr><th>工况</th><th class="num">电流</th><th>构成</th></tr></thead>
+  <tbody>
+    <tr><td>待机</td><td class="num">0.40 A</td><td>主控 0.3 + 麦阵/摄像头 0.1（不动）</td></tr>
+    <tr><td>轻度</td><td class="num">1.00 A</td><td>待机 + 偶发对话 + 少量移动</td></tr>
+    <tr><td><b>典型（活跃）</b></td><td class="num"><b>2.40 A</b></td><td>持续对话 + 边移动边看</td></tr>
+    <tr><td><b>峰值</b></td><td class="num"><b>4.25 A</b></td><td>4 电机同时堵转（起步/卡住）</td></tr>
+  </tbody>
+</table>
+
+<div class="box">
+  <b>关键判断</b>：皮皮是<b>陪伴机器人</b>，不是竞速小车。99% 的时间电流在 0.4~2.4 A 之间，
+  4.25 A 的堵转峰值只是瞬时冲一下。<b>所以放电能力只需覆盖峰值即可，不需要为"大电流"额外付费</b>——
+  这是下面选型结论的核心依据。
+</div>
+
+<h3>3.2 续航换算</h3>
+
+<p>按 <code>可用容量 = 标称容量 × 0.85</code> 计算（85% 放电效率，保护电芯寿命，不放到 3.0 V 截止）：</p>
+
+<table>
+  <thead><tr><th>容量</th><th class="num">待机 0.4A</th><th class="num">轻度 1.0A</th><th class="num">活跃 2.4A</th><th class="num">全负载 4.25A</th></tr></thead>
+  <tbody>
+    <tr><td>7.0 Ah</td><td class="num">14.9 h</td><td class="num">6.0 h</td><td class="num"><b>2.5 h</b></td><td class="num">1.4 h</td></tr>
+    <tr><td>10.0 Ah</td><td class="num">21.2 h</td><td class="num">8.5 h</td><td class="num"><b>3.5 h</b></td><td class="num">2.0 h</td></tr>
+    <tr><td>10.5 Ah</td><td class="num">22.3 h</td><td class="num">8.9 h</td><td class="num"><b>3.7 h</b></td><td class="num">2.1 h</td></tr>
+  </tbody>
+</table>
+
+<div class="box good">
+  <b>典型使用日 = 1.5~2.0 h 活跃</b>（早上 2 次对话 + 下午跟着走 20 分钟 + 晚上 30 分钟聊天）。
+  7.0 Ah 刚好覆盖一天，每晚充电即可 → <b>不需要为了续航买更大的电池</b>。
+</div>
+
+<!-- ============ 4 ============ -->
+<h2 id="s4">4. 五套电池方案对照</h2>
+
+<p>全部为 <b>3S</b> 配置，含 BMS + 镍带 + 支架 + 加工费（2026 年淘宝散件估算）。</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>方案</th><th class="num">容量</th><th class="num">持续放电</th>
+      <th class="num">重量</th><th>仓尺寸 W×L×H</th><th class="num">价格</th>
+      <th class="num">活跃续航</th><th class="num">放电裕度</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr class="best">
+      <td>18650 通用 · 3S2P <span class="pill rec">推荐</span></td>
+      <td class="num">7.0 Ah</td><td class="num">20 A</td><td class="num">0.34 kg</td>
+      <td>45×73×65 mm</td><td class="num">¥167</td><td class="num">2.5 h</td><td class="num">4.7×</td>
+    </tr>
+    <tr>
+      <td>18650 通用 · 3S3P</td>
+      <td class="num">10.5 Ah</td><td class="num">30 A</td><td class="num">0.48 kg</td>
+      <td>65×73×65 mm</td><td class="num">¥233</td><td class="num">3.7 h</td><td class="num">7.1×</td>
+    </tr>
+    <tr>
+      <td>18650 动力 · 3S2P <span class="pill no">不推荐</span></td>
+      <td class="num">6.0 Ah</td><td class="num">40 A</td><td class="num">0.35 kg</td>
+      <td>45×73×65 mm</td><td class="num">¥263</td><td class="num">2.1 h</td><td class="num">9.4×</td>
+    </tr>
+    <tr>
+      <td>21700 通用 · 3S2P <span class="pill mid">进阶</span></td>
+      <td class="num">10.0 Ah</td><td class="num">30 A</td><td class="num">0.48 kg</td>
+      <td>50×78×74 mm</td><td class="num">¥227</td><td class="num">3.5 h</td><td class="num">7.1×</td>
+    </tr>
+    <tr>
+      <td>26650 动力 · 3S2P <span class="pill no">不推荐</span></td>
+      <td class="num">10.0 Ah</td><td class="num">40 A</td><td class="num">0.61 kg</td>
+      <td>61×73×90 mm</td><td class="num">¥305</td><td class="num">3.5 h</td><td class="num">9.4×</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>4.1 单节电芯规格（供自行组包参考）</h3>
+
+<table>
+  <thead><tr><th>电芯</th><th class="num">直径</th><th class="num">长度</th><th class="num">单节重</th><th class="num">单节价</th><th>特点</th></tr></thead>
+  <tbody>
+    <tr><td><b>18650 通用</b>（3.5 Ah / 10 A）</td><td class="num">18.4 mm</td><td class="num">65.2 mm</td><td class="num">47 g</td><td class="num">¥22</td><td>最通用，便利店/五金店都有</td></tr>
+    <tr><td>18650 动力（3.0 Ah / 20 A）</td><td class="num">18.4 mm</td><td class="num">65.2 mm</td><td class="num">48 g</td><td class="num">¥38</td><td>高倍率，容量反而更低</td></tr>
+    <tr><td><b>21700 通用</b>（5.0 Ah / 15 A）</td><td class="num">21.2 mm</td><td class="num">70.4 mm</td><td class="num">70 g</td><td class="num">¥32</td><td>每 Wh 成本最低</td></tr>
+    <tr><td>26650 动力（5.0 Ah / 20 A）</td><td class="num">26.5 mm</td><td class="num">65.4 mm</td><td class="num">92 g</td><td class="num">¥45</td><td>最重，性价比差</td></tr>
+  </tbody>
+</table>
+
+<!-- ============ 5 ============ -->
+<h2 id="s5">5. 推荐结论与理由</h2>
+
+<div class="box good">
+  <h3 style="margin-top:0">首选：18650 通用电芯 · 3S2P · 7.0 Ah · ¥167</h3>
+  <p style="margin:8px 0 0">
+  <b>容量</b> 7.0 Ah（活跃 2.5 h / 待机 14.9 h）｜ <b>放电</b> 20 A（对 4.25 A 峰值 <b>4.7× 余量</b>）｜
+  <b>重量</b> 0.34 kg（全部方案里最轻）｜ <b>仓体</b> 45×73×65 mm
+  </p>
+</div>
+
+<h3>五条理由</h3>
+
+<ol>
+  <li><b>规格最通用，坏了单换一节。</b>18650 是全世界保有量最大的锂电规格，单节 ¥22，
+      楼下五金店/便利店就可能有。<b>别的方案要网购等快递。</b>陪伴机器人是"坏一次就很挫败"的产品，
+      可维护性比参数重要。</li>
+
+  <li><b>重量最轻，等于再压一次重心。</b>0.34 kg vs 21700 的 0.48 kg，
+      这 0.14 kg 全部挂在整车最低处，直接换算成侧翻裕度。</li>
+
+  <li><b>放电能力已经过设计点。</b>峰值 4.25 A，20 A 包给到 <b>4.7× 余量</b>，
+      电池几乎不发热。动力电芯的 40 A 是<b>为永远不会出现的工况付费</b>——而且它容量还更低（6.0 Ah）。</li>
+
+  <li><b>容量刚好匹配使用节奏。</b>典型日 1.5~2.0 h 活跃，7.0 Ah 覆盖一天。
+      与其加容量，不如<b>再买一块轮换</b>（¥167 换 30 秒，比等充电划算）。</li>
+
+  <li><b>不撑大底盘。</b>45 mm 仓宽轻松塞进 r=62 mm 枢纽。
+      3S3P 的 65 mm 会逼着枢纽半径涨到 70 mm，整个 footprint 跟着放大——
+      <b>为 1.2 h 续航不值得。</b></li>
+</ol>
+
+<h3>什么时候换成别的</h3>
+
+<table>
+  <thead><tr><th>如果你…</th><th>那选</th><th>理由</th></tr></thead>
+  <tbody>
+    <tr><td>要长时间移动（展会 / 陪老人全天走动）</td><td><b>21700 通用 3S2P</b>（¥227 / 3.5 h）</td><td>同体积多 43% 电量，仓宽只涨 5 mm</td></tr>
+    <tr><td>以后加升降柱 / 机械臂（大电流舵机）</td><td>18650 动力 3S2P 或 3S3P</td><td>届时峰值电流会翻倍，才需要 20 A 单节</td></tr>
+    <tr><td>手头已有 26650 电芯</td><td>直接用，别买新的</td><td>能用，但同样 10 Ah 比 21700 重 27%、贵 34%</td></tr>
+  </tbody>
+</table>
+
+<div class="box warn">
+  <b>明确不建议的两种情况</b>：<br>
+  ① <b>4S 电池</b> —— 满电 16.8 V 直接烧 C30D（耐压 12 V 级）。<br>
+  ② <b>无 BMS 的裸包 / BMS 电流 &lt; 20 A</b> —— 过放过流会鼓包起火。必须 <b>3S 均衡 BMS，≥20 A</b>。
+</div>
+
+<!-- ============ 6 ============ -->
+<h2 id="s6">6. 采购与使用要点</h2>
+
+<h3>6.1 采购清单</h3>
+
+<table>
+  <thead><tr><th>项</th><th>关键词（可直接搜淘宝）</th><th class="num">预算</th></tr></thead>
+  <tbody>
+    <tr><td>电芯 ×6</td><td><code>18650 动力/通用电芯 3500mAh</code>（要同批次同型号）</td><td class="num">¥132</td></tr>
+    <tr><td>BMS</td><td><code>3S 40A 锂电池保护板 带均衡</code></td><td class="num">¥20</td></tr>
+    <tr><td>支架</td><td><code>18650 电池支架 3S2P 贴片支架</code></td><td class="num">¥8</td></tr>
+    <tr><td>辅料</td><td><code>纯镍带 0.15mm + 焊锡/点焊</code>、<code>XT60 插头</code></td><td class="num">¥10</td></tr>
+    <tr><td>充电器</td><td><code>3S 锂电池平衡充电器 B3</code></td><td class="num">¥45</td></tr>
+    <tr><td colspan="2"><b>合计</b></td><td class="num"><b>≈ ¥215</b></td></tr>
+  </tbody>
+</table>
+
+<div class="box">
+  <b>省事方案</b>：直接搜 <code>18650 3S2P 电池组 11.1V</code>，让店家按 3S2P 组好带 BMS 出货，
+  ¥160~200 一台，省掉点焊设备。<b>但要求店家标明电芯型号与 BMS 电流</b>，
+  否则可能给你塞杂牌 2000mAh 电芯。
+</div>
+
+<h3>6.2 使用要点</h3>
+
+<ul>
+  <li><b>充电</b>：3S 平衡充，截止 12.6 V。建议长期存放电压 11.1 V（约 50%），别满电久放。</li>
+  <li><b>低压保护</b>：BMS 截止 9.0 V。若 C30D 报低压，别硬跑到自动关机，伤电芯。</li>
+  <li><b>仓位固定</b>：电池支架下挂，<b>松 2 颗 M3 + 拔 XT60 即可 30 秒换电</b>。做两块轮换比加容量划算。</li>
+  <li><b>线径</b>：电池到 C30D 用 <b>14 AWG 硅胶线</b>。短路电流大，线细了会发热甚至起火。</li>
+  <li><b>防火</b>：电池支架内壁喷三防漆或垫玻纤板；充电时不要无人看管。</li>
+  <li><b>温度</b>：连续大负载后电池会温热（&lt;45 ℃ 正常）。若烫手，检查是否 BMS 限流或电芯内阻过大。</li>
+</ul>
+
+<h3>6.3 验收检查（装好后必做）</h3>
+
+<ol>
+  <li>万用表量电池组输出：<b>11.1~12.6 V</b>（3S 正常区间）。</li>
+  <li>量三节串联的<b>均衡性</b>：每节压差 &lt; 0.05 V。</li>
+  <li>空载接 C30D，看板载指示灯，<b>不接电机</b>先确认不冒烟。</li>
+  <li>接电机空转，量瞬时电流是否在 4.25 A 量级内。</li>
+  <li>跑一轮 <code>ros2 topic echo /odom</code>，确认供电下通信稳定。</li>
+</ol>
+
+<!-- ============ 7 ============ -->
+<h2 id="s7">7. 自动回充与充电桩</h2>
+
+<h3>7.1 为什么麦轮底盘回充是「送分题」</h3>
+
+<p>回充的本质难题是<b>同时把「离桩距离」和「相对桩的偏角」归零</b>。差速底盘只有
+<code>(vx, wz)</code> 两个自由度，这两个量<b>耦合</b>——想转正就会偏离、想靠近就会撞歪，
+只能倒 S 形 S 曲线或反复「前进-量一下-修正-后退」。</p>
+
+<p>麦轮有 <code>(vx, vy, wz)</code> <b>三个正交自由度</b>，可以把对接<b>解耦</b>成三段：</p>
+
+<table>
+  <thead><tr><th>段</th><th>控制量</th><th>做什么</th><th class="num">限速</th></tr></thead>
+  <tbody>
+    <tr><td><b>① 缩距</b></td><td><code>linear.x</code></td><td>沿桩法线靠近</td><td class="num">0.15 m/s</td></tr>
+    <tr><td><b>② 调心偏</b></td><td><code>linear.y</code></td><td>纯横向平移（不动航向）</td><td class="num">0.06 m/s</td></tr>
+    <tr><td><b>③ 调角偏</b></td><td><code>angular.z</code></td><td>原地旋转（不动位置）</td><td class="num">0.35 rad/s</td></tr>
+  </tbody>
+</table>
+
+<div class="box">
+  <b>关键结论：C30D 固件一行都不用改。</b>
+  这三种运动本来就是 <code>/cmd_vel</code> 自带的标准字段。别的底盘做回充往往得在固件里
+  加专用回充模式；皮皮不用——<b>三个正交自由度 + 一个 P 控制器就够了</b>。
+</div>
+
+<h3>7.2 引导方式：远程视觉 + 近程红外</h3>
+
+<table>
+  <thead><tr><th>方案</th><th>精度</th><th>成本</th><th>需算力</th><th>适用距离</th><th>皮皮</th></tr></thead>
+  <tbody>
+    <tr><td>单种红外</td><td>差</td><td>极低</td><td>无</td><td>&lt;1 m</td><td>只做近程</td></tr>
+    <tr style="background:rgba(39,174,96,.12)"><td><b>红外 + 视觉融合</b></td><td><b>高（&lt;2 cm）</b></td><td><b>低</b></td><td><b>低</b></td><td><b>0.3~3 m</b></td><td><b>✅ 采用</b></td></tr>
+    <tr><td>激光雷达识别凹凸</td><td>高</td><td>高</td><td>高</td><td>2~5 m</td><td>✗ 没装雷达</td></tr>
+    <tr style="background:rgba(39,174,96,.12)"><td><b>AprilTag 视觉</b></td><td><b>高</b></td><td><b>极低</b></td><td>中</td><td>0.5~4 m</td><td><b>✅ 远程段</b></td></tr>
+    <tr><td>超声波</td><td>差</td><td>低</td><td>无</td><td>&lt;2 m</td><td>只作避障</td></tr>
+  </tbody>
+</table>
+
+<p><b>选择理由 = 复用已有硬件</b>：皮皮已有 1080P 无畸变摄像头，远程段<b>不新增任何硬件</b>，
+只在桩面贴一张 AprilTag（¥1）；近程段 2 只红外发射管（桩）+ 2 只接收管（车尾），
+合计 <b>¥30 以内</b>。</p>
+
+<figure>
+<svg viewBox="0 0 680 300" xmlns="http://www.w3.org/2000/svg" style="background:#fff">
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#2471a3"/>
+    </marker>
+    <marker id="arg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#27ae60"/>
+    </marker>
+  </defs>
+
+  <!-- 地面 -->
+  <line x1="30" y1="230" x2="650" y2="230" stroke="#888" stroke-width="1.5"/>
+
+  <!-- 远段标尺 -->
+  <text x="40" y="42" font-size="12" font-weight="700" fill="#2471a3">远程段　3.0 m → 0.35 m</text>
+  <text x="400" y="42" font-size="12" font-weight="700" fill="#27ae60">近程段　0.35 m → 0 m</text>
+
+  <!-- 桩 -->
+  <rect x="600" y="160" width="46" height="70" rx="4" fill="#34495e"/>
+  <rect x="604" y="150" width="38" height="12" rx="2" fill="#5d6d7e"/>
+  <text x="612" y="248" font-size="10" fill="#34495e">充电桩</text>
+  <!-- 桩面 AprilTag -->
+  <rect x="608" y="176" width="26" height="26" fill="#fff" stroke="#34495e" stroke-width="1"/>
+  <rect x="612" y="180" width="8" height="8" fill="#222"/>
+  <rect x="624" y="188" width="7" height="7" fill="#222"/>
+  <text x="606" y="215" font-size="8" fill="#34495e">AprilTag</text>
+  <!-- 红外发射 -->
+  <circle cx="596" cy="196" r="3.5" fill="#c0392b"/>
+  <circle cx="596" cy="206" r="3.5" fill="#c0392b"/>
+
+  <!-- 车（远段位置） -->
+  <g>
+    <rect x="90" y="176" width="86" height="54" rx="10" fill="#5dade2" opacity="0.85"/>
+    <text x="106" y="208" font-size="11" fill="#1b4f72" font-weight="700">皮皮</text>
+    <circle cx="128" cy="172" r="7" fill="#2c3e50"/>
+    <text x="100" y="160" font-size="9" fill="#2c3e50">摄像头（朝前）</text>
+  </g>
+
+  <!-- 远段箭头：摄像头看桩 -->
+  <line x1="140" y1="150" x2="590" y2="150" stroke="#2471a3" stroke-width="1.6"
+        stroke-dasharray="7 4" marker-end="url(#ar)"/>
+  <text x="300" y="142" font-size="10" fill="#2471a3">① 摄像头看 AprilTag → 解算相对位姿 → 只走 vx 缩距</text>
+
+  <!-- 近段：车倒进桩 -->
+  <g>
+    <rect x="470" y="188" width="72" height="42" rx="9" fill="#a9dfbf" opacity="0.9"/>
+    <text x="486" y="214" font-size="10" fill="#1e6b41" font-weight="700">皮皮</text>
+    <!-- 车尾红外接收管 -->
+    <circle cx="546" cy="200" r="3" fill="#7d3c98"/>
+    <circle cx="546" cy="216" r="3" fill="#7d3c98"/>
+    <text x="452" y="254" font-size="9" fill="#7d3c98">车尾双接收管</text>
+  </g>
+
+  <!-- 近段红外链路 -->
+  <line x1="590" y1="198" x2="552" y2="200" stroke="#c0392b" stroke-width="1.4"
+        marker-end="url(#ar)"/>
+  <line x1="590" y1="206" x2="552" y2="216" stroke="#c0392b" stroke-width="1.4"
+        marker-end="url(#ar)"/>
+
+  <!-- 近段三段闭环说明 -->
+  <line x1="470" y1="290" x2="580" y2="290" stroke="#27ae60" stroke-width="1.6"
+        marker-end="url(#arg)"/>
+  <text x="150" y="278" font-size="10" fill="#27ae60">② 红外解算 横向偏差 + 航向偏差 → 三段解耦闭环：缩距 vx ｜ 调心偏 vy ｜ 调角偏 wz</text>
+
+  <!-- 倒车方向 -->
+  <line x1="470" y1="264" x2="600" y2="264" stroke="#27ae60" stroke-width="2"
+        marker-end="url(#arg)"/>
+  <text x="500" y="258" font-size="9" fill="#27ae60">倒车进桩</text>
+</svg>
+<figcaption>图 3　回充两阶段引导：远程 AprilTag 视觉（只缩距）+ 近程双红外（三段解耦对齐）。
+近程切换到红外的原因：皮皮是倒车进桩，摄像头朝前，最后 35 cm 看不见桩面。</figcaption>
+</figure>
+
+<h3>7.3 状态机</h3>
+
+<pre style="background:#f6f8fa;border:1px solid #ddd;border-radius:8px;padding:14px;font-size:12px;line-height:1.6;overflow-x:auto">
+                 battery ≤ 25% / 闲置 ≥ 20min / 到点 23:30
+   IDLE ──────────────────────────────────────────▶ SEEK
+     ▲                                                │ 看到 AprilTag
+     │ 充满                                            ▼
+  CHARGING ◀──触点闭合+有电流── DOCKED ◀──────── APPROACH
+     │                             ▲               │ 距离 ≤ 0.35m
+     │ 触点脱离                     │ 三段全进死区    ▼
+     └──────────▶ SEEK            ALIGN ◀───────────┘
+                                  │ 超时(25s)
+                                  ▼
+                            SEEK（冷却 15 拍后重试）
+                                  │ 累计 > 3 次
+                                  ▼
+                                 FAIL
+     触点闭合但 10s 无电流 ──────▶ FAULT
+     有人靠近(&lt;0.8m) ────────────▶ 暂停让路（状态不变，人走开自动恢复）
+</pre>
+
+<h4>三个踩坑换来的设计细节</h4>
+
+<table>
+  <thead><tr><th>坑</th><th>现象</th><th>修法</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>失败后立刻重试</td>
+      <td>感知观测还是旧的，<code>SEEK→APPROACH→ALIGN</code> 一拍走完，
+          <b>同一失败瞬间复现</b>，<code>retries</code> 永远到不了上限，控制器抖动</td>
+      <td>失败后进 <b>15 拍冷却</b>，给感知刷新时间</td>
+    </tr>
+    <tr>
+      <td>P 增益过高</td>
+      <td><code>wz_kp=2.0</code> 配 8° 偏差，一拍转过 16°，直接冲到 <b>−8°</b>，
+          <b>对称振荡成极限环</b>，永不收敛</td>
+      <td>死区 3 倍范围内按 <code>|e|/(死区×3)</code> <b>线性压增益</b>（下限 0.15），实测 5 拍收敛</td>
+    </tr>
+    <tr>
+      <td>近场锁死 vx</td>
+      <td>写「距桩 &lt;60mm 直接 <code>vx=0</code>」，但到位死区是 <b>12mm</b>，
+          车停在 60mm 处<b>永远满足不了到位条件</b></td>
+      <td>改为近场把 <code>vx</code> 压到 0.02 m/s <b>减速爬行</b>，走完最后几十毫米</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>7.4 充电桩机械设计</h3>
+
+<figure>
+<svg viewBox="0 0 680 330" xmlns="http://www.w3.org/2000/svg" style="background:#fff">
+  <defs>
+    <marker id="a4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#c0392b"/>
+    </marker>
+  </defs>
+
+  <!-- 桩体俯视：马蹄形 -->
+  <path d="M180,60 L500,60 L500,240 L400,240 L400,120 L280,120 L280,240 L180,240 Z"
+        fill="#34495e" stroke="#22313f" stroke-width="1.5"/>
+  <!-- 开口标注 -->
+  <line x1="280" y1="112" x2="400" y2="112" stroke="#c0392b" stroke-width="1.2" stroke-dasharray="4 3"/>
+  <text x="316" y="106" font-size="10" fill="#c0392b" font-weight="700">开口 210 mm</text>
+  <!-- 总宽 -->
+  <line x1="180" y1="52" x2="500" y2="52" stroke="#555" stroke-width="1"/>
+  <text x="308" y="46" font-size="10" fill="#555" font-weight="700">260 mm</text>
+  <!-- 进深 -->
+  <line x1="508" y1="60" x2="508" y2="240" stroke="#555" stroke-width="1"/>
+  <text x="514" y="154" font-size="10" fill="#555" font-weight="700">120</text>
+
+  <!-- 导引斜板 -->
+  <line x1="180" y1="240" x2="118" y2="300" stroke="#2471a3" stroke-width="4"/>
+  <line x1="280" y1="240" x2="342" y2="300" stroke="#2471a3" stroke-width="4"/>
+  <text x="60" y="316" font-size="10" fill="#2471a3">导引斜板 ±22°</text>
+  <text x="352" y="316" font-size="10" fill="#2471a3">总容差 ±56 mm</text>
+
+  <!-- 触点面板（桩体后缘） -->
+  <rect x="352" y="196" width="148" height="6" fill="#e67e22"/>
+  <!-- 双触点铜柱 -->
+  <circle cx="410" cy="199" r="5" fill="#d4ac0d" stroke="#7d6608" stroke-width="1"/>
+  <circle cx="440" cy="199" r="5" fill="#d4ac0d" stroke="#7d6608" stroke-width="1"/>
+  <text x="404" y="170" font-size="9" fill="#7d6608">触点 ×2</text>
+  <text x="404" y="159" font-size="9" fill="#7d6608">间距 22mm</text>
+  <!-- 红外发射管 -->
+  <circle cx="380" cy="199" r="3.2" fill="#c0392b"/>
+  <circle cx="470" cy="199" r="3.2" fill="#c0392b"/>
+  <text x="336" y="248" font-size="9" fill="#c0392b">IR ×2（±40mm）</text>
+  <text x="336" y="259" font-size="9" fill="#888">46 mm 高（离地）</text>
+
+  <!-- 车体倒进方向 -->
+  <line x1="340" y1="300" x2="340" y2="250" stroke="#c0392b" stroke-width="2"
+        marker-end="url(#a4)"/>
+  <text x="220" y="292" font-size="11" fill="#c0392b" font-weight="700">← 车体从开口倒进来</text>
+
+  <!-- 高度注记 -->
+  <text x="520" y="80" font-size="11" fill="#555" font-weight="700">桩体高 48 mm</text>
+  <text x="520" y="96" font-size="10" fill="#888">低矮，不挡视线</text>
+  <text x="520" y="118" font-size="10" fill="#888">皮皮「钻」进去</text>
+</svg>
+<figcaption>图 4　充电桩俯视：马蹄形桩体 260×120×48 mm，中央开口 210 mm，两侧 ±22° 导引斜板
+把车「喂」进去；触点与红外管装在桩体后缘的<b>竖直面板</b>上。</figcaption>
+</figure>
+
+<h4>为什么触点装在「竖直面」而不是「地面」</h4>
+
+<table>
+  <thead><tr><th></th><th>地面触点</th><th>竖直面触点（★ 采用）</th></tr></thead>
+  <tbody>
+    <tr><td>积灰</td><td>灰尘直接落在触点上</td><td><b>竖直面不积灰</b></td></tr>
+    <tr><td>车轮压过</td><td>麦轮<b>会压到</b>触点</td><td>麦轮走两侧，不碰触点</td></tr>
+    <tr><td>自清洁</td><td>无</td><td>每次对接「顶」进去，<b>有刮擦自清洁效果</b></td></tr>
+    <tr><td>排水</td><td>泼水会泡触点</td><td>不积水</td></tr>
+  </tbody>
+</table>
+
+<h4>桩体规格</h4>
+
+<table>
+  <thead><tr><th>参数</th><th class="num">值</th><th>为什么</th></tr></thead>
+  <tbody>
+    <tr><td>桩体外形</td><td class="num">260 × 120 × 48 mm</td><td>低矮（48mm），不挡视线</td></tr>
+    <tr><td>中央开口</td><td class="num">210 mm</td><td>车尾约 150mm → 单侧 30mm 余量</td></tr>
+    <tr><td>导引口外张</td><td class="num">±56 mm</td><td>只要大致对准就能被「喂」进去</td></tr>
+    <tr><td>触点高度</td><td class="num">46 mm（竖直面）</td><td>避开麦轮、避开地面灰尘</td></tr>
+    <tr><td>两触点间距</td><td class="num">22 mm</td><td>爬电距离 12 mm（&gt;8 mm 安全线）</td></tr>
+    <tr><td>红外管位置</td><td class="num">触点两侧 ±40 mm</td><td>三角定位基线</td></tr>
+    <tr><td>壁厚</td><td class="num">4.0 mm（PETG）</td><td>承重不大，打印即可</td></tr>
+  </tbody>
+</table>
+
+<h3>7.5 桩端电气</h3>
+
+<table>
+  <thead><tr><th>项</th><th class="num">值</th><th>说明</th></tr></thead>
+  <tbody>
+    <tr><td>充电电流</td><td class="num"><b>12.6 V / 3.5 A</b></td><td><b>0.5C</b>（18650 3S2P 7.0Ah），功率约 <b>44 W</b></td></tr>
+    <tr><td>充满电压</td><td class="num">12.6 V</td><td>恒压后转涓流（3S 满充点）</td></tr>
+    <tr><td>触点材料</td><td class="num">铜镀镍弹片</td><td>弹簧行程 3 mm，耐插拔、抗氧化</td></tr>
+    <tr><td>保护</td><td class="num">肖特基 + 自恢复保险丝</td><td>防反接、防短路</td></tr>
+    <tr><td>接地</td><td class="num">桩体前缘铜片</td><td>先接地泄静电，对接不放电火花</td></tr>
+    <tr><td><b>接触点发热</b></td><td class="num"><b>0.49 W</b></td><td>3.5A² × 20mΩ × 2 点，可忽略</td></tr>
+  </tbody>
+</table>
+
+<div class="box">
+  <b>为什么不 1C 快充（7.0 A）？</b> 7 A 会让电芯温升明显、循环寿命掉得快；
+  而皮皮是「回家过夜充」的场景，<b>2 小时充满和 1 小时充满对用户没区别</b>。
+  0.5C 换来的电池寿命更划算。
+</div>
+
+<h3>7.6 低电提醒话术</h3>
+
+<p>陪伴机器人<b>不能「默默走开」</b>——用户感知里那等于「坏了」。所以回充前一定要先说一声：</p>
+
+<table>
+  <thead><tr><th class="num">电量</th><th>皮皮会说什么</th></tr></thead>
+  <tbody>
+    <tr><td class="num">≤10%</td><td>「喂，我快没电了（8%），我先回去充一会儿，马上回来找你。」</td></tr>
+    <tr><td class="num">≤20%</td><td>「我电量只剩 18% 了，去充个电，别趁我不在偷吃零食啊。」</td></tr>
+    <tr><td class="num">其他</td><td>「电量 24% 了，我顺路去补个电，很快。」</td></tr>
+  </tbody>
+</table>
+
+<h3>7.7 采购清单（充电桩）</h3>
+
+<table>
+  <thead><tr><th>项</th><th>关键词（可直接搜淘宝）</th><th class="num">预算</th></tr></thead>
+  <tbody>
+    <tr><td>桩体打印</td><td><code>PETG 耗材 1.75mm</code>（约 150g）</td><td class="num">¥15</td></tr>
+    <tr><td>触点弹片 ×2</td><td><code>铜镀镍 弹簧触点 大电流 5A</code></td><td class="num">¥8</td></tr>
+    <tr><td>红外发射管 ×2</td><td><code>5mm 940nm 红外发射管</code></td><td class="num">¥4</td></tr>
+    <tr><td>红外接收管 ×2</td><td><code>5mm 红外接收管 配对</code></td><td class="num">¥6</td></tr>
+    <tr><td>防反接 + 保险丝</td><td><code>SS34 肖特基</code>、<code>自恢复保险丝 5A</code></td><td class="num">¥5</td></tr>
+    <tr><td>电源适配器</td><td><code>12.6V 4A 锂电池充电器</code></td><td class="num">¥45</td></tr>
+    <tr><td>连线接插件</td><td><code>XT30 插头</code>、<code>杜邦线</code></td><td class="num">¥10</td></tr>
+    <tr><td colspan="2"><b>合计</b></td><td class="num"><b>≈ ¥93</b></td></tr>
+  </tbody>
+</table>
+
+<!-- ============ 8 ============ -->
+<h2 id="s8">8. 无线充电可行性判断</h2>
+
+<div class="box" style="border-left-color:#27ae60">
+  <b>结论：技术上完全可以，但对皮皮不推荐作为首选。</b><br>
+  理由不是「无线不好」，而是<b>无线擅长的场景皮皮一个都不占</b>。
+</div>
+
+<h3>8.1 效率与发热：无线多出来的损耗是实打实的</h3>
+
+<p>皮皮充电功率约 <b>44 W</b>（12.6 V × 3.5 A），三种方案的账：</p>
+
+<table>
+  <thead>
+    <tr><th>方案</th><th class="num">典型效率</th><th class="num">输入功率</th>
+        <th class="num">损耗（全变热）</th><th class="num">充满时间</th></tr>
+  </thead>
+  <tbody>
+    <tr style="background:rgba(39,174,96,.12)">
+      <td><b>有线触点</b></td><td class="num"><b>90~95%</b></td><td class="num">46.3 W</td>
+      <td class="num"><b>2.3 W</b></td><td class="num">30~60 min</td></tr>
+    <tr><td>无线 · 磁共振</td><td class="num">80~90%</td><td class="num">48.9~55 W</td>
+        <td class="num">4.9~11 W</td><td class="num">60~120 min</td></tr>
+    <tr style="background:rgba(192,57,43,.08)">
+      <td>无线 · 电磁感应（Qi 类）</td><td class="num"><b>70~80%</b></td>
+      <td class="num">55~62.9 W</td><td class="num"><b>11~19 W</b></td><td class="num">45~120 min</td></tr>
+  </tbody>
+</table>
+
+<p>Qi 标准本体是 <b>5~15 W、距离 ≤4 cm</b> —— 皮皮需要 44 W，<b>超出 Qi 常规档位</b>，
+得用专门的 40~60 W 无线充电模组（成本上去了）。</p>
+
+<div class="box" style="border-left-color:#c0392b">
+  <b>关键问题：这 11~19 W 的损耗在皮皮身上是负担。</b><br>
+  皮皮的底盘是<b>密闭的</b>（要防尘、防宠物毛），线圈和接收板都在底板下方，
+  本来就靠底盘金属板导热。多出十几瓦的持续发热，要么设计散热通道（破坏密封性），
+  要么让电芯长期在偏高温度下充电（<b>锂电寿命杀手</b>）。
+  而触点方案的损耗是 <b>2.3 W</b>，还是分散在两个小触点上，<b>根本不需要专门散热</b>。
+</div>
+
+<h3>8.2 对齐精度：无线反而要求更高</h3>
+
+<table>
+  <thead><tr><th></th><th class="num">允许偏移</th><th class="num">允许偏角</th></tr></thead>
+  <tbody>
+    <tr style="background:rgba(39,174,96,.12)">
+      <td><b>触点（弹簧弹片）</b></td><td class="num"><b>±15 mm 以上</b></td><td class="num">±10° 以上</td></tr>
+    <tr><td>无线（Ø40 线圈）</td><td class="num"><b>±13 mm 以内</b>效率就开始掉</td>
+        <td class="num"><b>±5° 以内</b>，偏角影响极大</td></tr>
+  </tbody>
+</table>
+
+<p>线圈外径 40 mm 时，偏移超过约 <b>1/3 外径（13 mm）</b> 效率断崖式下跌。
+也就是说 <b>无线充电对「对得准不准」的要求，比触点更高</b> ——
+这跟我们「无线 = 随便放」的直觉正好相反。</p>
+
+<p>而 §7.1 的三段式控制之所以够用，正是因为<b>触点方案容差大</b>。
+换成无线，等于把对接精度要求反向提高一档，<b>反而更容易失败</b>。</p>
+
+<h3>8.3 成本与寿命</h3>
+
+<table>
+  <thead><tr><th></th><th class="num">触点方案</th><th class="num">无线方案</th></tr></thead>
+  <tbody>
+    <tr><td>桩端</td><td class="num">弹片+二极管+保险丝 ≈ <b>¥20</b></td><td class="num">40W 发射模组 ≈ ¥120~300</td></tr>
+    <tr><td>车端</td><td class="num">触点座 ≈ <b>¥10</b></td><td class="num">接收模组+线圈 ≈ ¥80~200</td></tr>
+    <tr style="background:rgba(39,174,96,.12)"><td><b>合计</b></td><td class="num"><b>≈ ¥30</b></td>
+        <td class="num"><b>≈ ¥200~500</b></td></tr>
+    <tr><td>寿命瓶颈</td><td>触点磨损（万次量级）</td><td>线圈/电容老化、发热累积</td></tr>
+    <tr><td>维护</td><td>偶尔擦触点</td><td>无接点，免维护</td></tr>
+    <tr><td>恶劣环境</td><td>潮湿需防护</td><td><b>可全密封</b>（防水防尘）</td></tr>
+    <tr><td>待机功耗</td><td class="num">0</td><td>发射端需持续探测（数 W）</td></tr>
+  </tbody>
+</table>
+
+<h3>8.4 什么条件下改用无线</h3>
+
+<p>不是「永不」，而是 <b>满足以下任一条件就值得切</b>：</p>
+
+<ol>
+  <li><b>底盘要做得完全密封</b>（比如以后要加「可水洗」卖点，或加湿器旁使用）；</li>
+  <li><b>有多台皮皮</b>在同一充电区轮换（触点规格不统一、磨损集中在一个桩上）；</li>
+  <li><b>充电桩位置固定且要求「零维护」</b>（比如装在地毯下、家具底，够不着擦触点）；</li>
+  <li>充电功率降到 <b>10 W 以下</b>（比如只做待机补电），落入 Qi 标准档位，
+      模组便宜、效率影响也小。</li>
+</ol>
+
+<h3>8.5 场景匹配度对照</h3>
+
+<table>
+  <thead><tr><th>无线明显更划算的场景</th><th>皮皮符合吗</th></tr></thead>
+  <tbody>
+    <tr><td>24h 高稼动率（触点磨损快、维护成本高）</td><td>❌ 皮皮每晚充一次</td></tr>
+    <tr><td>多台机器人共用充电区（触点规格难统一）</td><td>❌ 单台</td></tr>
+    <tr><td>恶劣环境：潮湿、粉尘、油污、户外</td><td>❌ 家庭室内地面</td></tr>
+    <tr><td>需要<b>完全密封</b>（防水冲洗 / 食品厂 / 医院消毒）</td><td>❌ 无需冲洗</td></tr>
+    <tr><td>有易燃气体/粉尘，怕触点打火</td><td>❌ 无</td></tr>
+  </tbody>
+</table>
+
+<p><b>皮皮的场景（家庭室内、单台、每晚充一次、地面干净）把触点方案的优势全部命中，
+把无线的优势全部避开。</b></p>
+
+<div class="box" style="border-left-color:#2471a3">
+  <b>过渡方案（推荐做法）</b>：先按 §7 的触点方案做。触点座和无线接收线圈占用的是
+  <b>同一个位置、同一块底板区域</b>，底板留好安装孔位即可 —— 将来想切无线，
+  换一块底板、去掉弹片就行，<b>车体结构和 <code>DockController</code> 一行都不用改</b>
+  （因为对接控制逻辑完全一样，只是「最后 10mm 用不用顶进去」的差别）。
+  这就是把对接<b>解耦成三段</b>的另一个好处：<b>换了充电方式，控制策略不变。</b>
+</div>
+
+<h3>8.6 代码落地与验证</h3>
+
+<table>
+  <thead><tr><th>文件</th><th>改动</th></tr></thead>
+  <tbody>
+    <tr><td><code>src/pipi/orchestration/dock.py</code></td>
+        <td><b>新建</b> <code>DockController</code>（状态机 + 三段式 P 控制，纯逻辑可单测）</td></tr>
+    <tr><td><code>src/pipi/domain/motion.py</code></td>
+        <td><code>DockState</code> / <code>DockStatus</code> + 3 个新 <code>Gesture</code></td></tr>
+    <tr><td><code>src/pipi/providers/motion/wheeltec.py</code></td>
+        <td><code>dock_velocity()</code> / <code>dock_stop()</code> / <code>charge_pose()</code></td></tr>
+    <tr><td><code>src/pipi/providers/motion/mock.py</code></td>
+        <td>同签名实现（含同样限幅，保证可替换）</td></tr>
+    <tr><td><code>configs/default.yaml</code></td>
+        <td>新增 <code>charging:</code> 段；<code>proactive.triggers.low_battery</code>（priority 95）</td></tr>
+    <tr><td><code>hardware/dock.scad</code></td><td><b>新建</b> 充电桩参数化模型（自带几何自检）</td></tr>
+    <tr><td><code>tests/integration/test_dock_controller.py</code></td>
+        <td><b>新建</b> 32 项自检，<code>python3</code> 直接跑</td></tr>
+  </tbody>
+</table>
+
+<div class="box" style="border-left-color:#27ae60">
+  <b>验证结果</b><br>
+  · <code>test_dock_controller.py</code> → <b>32/32 通过</b><br>
+  · <code>test_proactive_vision.py</code> → <b>48/48 通过（无回归）</b><br>
+  · 端到端冒烟：从「车在桩右 45mm、歪 7°、距桩 280mm」出发，
+  <b>6 拍收敛到 DOCKED</b>（残差 −5.0 mm / −0.53° / 6.0 mm，全在死区内）
+</div>
+
+<footer>
+  皮皮 · 底盘示意图与电池建议报告 ｜ 2026-10-05<br>
+  数据来源：<code>CHASSIS.md</code> §5/§6/§8/§12、<code>hardware/chassis.scad</code> 与
+  <code>hardware/dock.scad</code> 几何自检输出。<br>
+  所有电流/续航/扭矩数字均由功耗模型计算得出；价格按淘宝散件 2026 年估算，实际以下单时为准。
+</footer>
+
+</div>
+</body>
+</html>

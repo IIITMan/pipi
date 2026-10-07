@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pipi"
+version = "0.1.0"
+description = "皮皮 —— 情感陪伴机器人软件系统（情感对话/稀疏记忆/人格设定/视觉感知/运动预留）"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+
+# 核心依赖：一个都不装也能跑（--sim 模式）
+dependencies = []
+
+[project.optional-dependencies]
+# 对话大脑（任一即可）
+llm = ["pyyaml>=6.0"]
+# 语音理解：SenseVoice 需要（sounddevice 为麦克风采集）
+speech = ["funasr>=1.1.0", "modelscope>=1.15.0", "torch>=2.0.0", "soundfile", "sounddevice>=0.4.6"]
+# 语音合成：CosyVoice（重）或 edge-tts（轻）
+tts-local = ["cosyvoice"]
+tts-cloud = ["edge-tts"]
+# 视觉
+vision = ["opencv-python>=4.8.0", "numpy>=1.24.0", "insightface>=0.7.3"]
+vision-lite = ["opencv-python>=4.8.0", "numpy>=1.24.0"]
+expression = ["hsemotion-onnx"]
+# 记忆向量检索
+vector = ["sentence-transformers>=2.2.0", "numpy>=1.24.0"]
+# Web 界面
+web = ["fastapi>=0.110.0", "uvicorn>=0.27.0"]
+# 硬件（C30D 经 ROS2 话题通信，Python 侧只需 rclpy —— 随 ROS2 发行版安装）
+hardware = []
+# 专用关键词唤醒（sherpa-onnx KWS，待机零负载）
+kws = ["sherpa-onnx>=1.13"]
+# 开发
+dev = ["pytest>=7.4.0", "pytest-asyncio>=0.23.0"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+filterwarnings = ["ignore::DeprecationWarning"]
