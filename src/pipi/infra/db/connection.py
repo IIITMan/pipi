@@ -55,7 +55,30 @@ class Database:
         sql = self.schema_path.read_text(encoding="utf-8")
         with self.conn as conn:
             conn.executescript(sql)
+        self._migrate()
         logger.debug("数据库初始化完成：%s", self.path)
+
+    def _migrate(self) -> None:
+        """旧库幂等迁移：CREATE TABLE IF NOT EXISTS 不会给旧表补列，这里补。"""
+        expected = {
+            "users": ["relationship_stage", "stage_since", "meet_date",
+                      "nickname_authorized"],
+        }
+        for table, columns in expected.items():
+            existing = {r["name"] for r in
+                        self.query(f"PRAGMA table_info({table})")}
+            if not existing:
+                continue   # 表不存在：schema.sql 已建好新表
+            for col in columns:
+                if col not in existing:
+                    default = {"relationship_stage": "1",
+                               "stage_since": "0", "meet_date": "0",
+                               "nickname_authorized": "0"}.get(col, "0")
+                    self.conn.execute(
+                        f"ALTER TABLE {table} ADD COLUMN {col} "
+                        f"{'INTEGER' if col in ('relationship_stage', 'nickname_authorized') else 'REAL'} "
+                        f"DEFAULT {default}")
+        self.commit()
 
     # ---- 查询辅助 ----
 

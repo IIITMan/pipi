@@ -1,45 +1,25 @@
-"""Prompt 模板加载。
-
-用极简的 {{var}} 替换（不引 jinja2 依赖），
-模板文件放同目录 *.jinja。
-"""
+"""Prompt 模板渲染（Jinja2）。"""
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
+from typing import Any
 
-_DIR = Path(__file__).parent
-_CACHE: dict[str, str] = {}
-_VAR = re.compile(r"\{\{\s*(\w+)\s*\}\}")
-
-
-def load(name: str) -> str:
-    """加载模板文本（带缓存）。"""
-    if name not in _CACHE:
-        path = _DIR / name
-        if not path.exists():
-            raise FileNotFoundError(f"未找到模板：{path}")
-        _CACHE[name] = path.read_text(encoding="utf-8")
-    return _CACHE[name]
+try:
+    import jinja2
+    _ENV = jinja2.Environment(
+        loader=jinja2.FileSystemLoader(Path(__file__).parent),
+        autoescape=False, keep_trailing_newline=False,
+    )
+except ImportError:            # jinja2 非核心依赖（fastapi 会带上）
+    _ENV = None
 
 
-def render(name: str, **kwargs) -> str:
-    """渲染模板：{{var}} 替换。未提供的变量保持原样（便于调试）。"""
-    text = load(name)
-
-    def repl(m: re.Match) -> str:
-        key = m.group(1)
-        if key in kwargs:
-            val = kwargs[key]
-            return "" if val is None else str(val)
-        return m.group(0)
-
-    return _VAR.sub(repl, text)
-
-
-def clear_cache() -> None:
-    _CACHE.clear()
-
-
-__all__ = ["load", "render", "clear_cache"]
+def render(template: str, **kwargs: Any) -> str:
+    """渲染 prompts/ 下的模板。jinja2 缺失时退回 {var} 直替。"""
+    if _ENV is not None:
+        return _ENV.get_template(template).render(**kwargs).strip()
+    text = (Path(__file__).parent / template).read_text(encoding="utf-8")
+    for k, v in kwargs.items():
+        text = text.replace("{{ " + k + " }}", str(v)).replace("{{" + k + "}}", str(v))
+    return text.strip()

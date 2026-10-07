@@ -29,6 +29,8 @@ llm:
   provider: "doubao"           # qwen | deepseek | doubao | openai | mock
   base_url: "https://ark.cn-beijing.volces.com/api/v3"
   api_key: "ark-REDACTED-LLM-KEY"   # 建议改用环境变量 PIPI_LLM__API_KEY
+  # 机器人的名字（与人格名区分：人格是"傲娇"，名字是"皮皮"）
+  bot_name: "皮皮"
   # ① 主对话模型：闲聊 / 共情 / 有性格的回应
   #    火山方舟模型全名带日期后缀（/models 接口可查）
   model: "doubao-seed-2-1-lite-260915"
@@ -130,8 +132,20 @@ audio:
       api_key: ""
       model: "paraformer-realtime-v2"
   # TTS 降级链
-  tts_chain: ["cosyvoice", "edge_tts", "mock"]
+  tts_chain: ["ark_tts", "cosyvoice", "edge_tts", "mock"]
   tts:
+    # 豆包语音合成大模型 2.0（首选：真流式、情感演绎，按字计费）
+    # key 从「火山引擎 > 语音技术控制台 > API Key 管理」获取
+    ark_tts:
+      api_key: "ARK_REDACTED_TTS_KEY"
+      resource_id: "seed-tts-2.0"
+      speaker: "zh_female_peiqi_uranus_bigtts"   # 音色 ID（控制台 > 音色库 可换）
+      model: ""                                # 复刻音色时才需指定
+      sample_rate: 24000
+      bitrate: 160000
+      emotion_instruction: true                # 2.0 语音指令：按情绪调整语气（不计费）
+      cache_enabled: true                      # 固定短语（唤醒应答等）合成一次后播本地缓存
+      cache_dir: "data/tts_cache"
     cosyvoice:
       model: "iic/CosyVoice-300M"
       device: "auto"
@@ -173,6 +187,66 @@ audio:
     enabled: true
     vad_threshold: 0.5         # 用户开口判定阈值
     min_speech_ms: 200
+
+# ---------------- 生命模块（自发念头/生理状态，v2.1 阶段1）----------------
+life:
+  enabled: true
+  personality:                 # §2.4 人格固定参数
+    extraversion: 6.0          # 外向度 0~10，越高越爱主动说话
+    curiosity_weight: 6.0
+    sensitivity: 5.0           # 高则容易被打断/冷落影响情绪
+    like: ["晚霞", "小故事", "聊天气"]
+    dislike: ["巨大噪音", "连续频繁打断"]
+  rates:                       # §8 后台任务周期
+    physio_hz: 1.0             # 生理更新 1Hz
+    thought_hz: 3.0            # 念头生成 3Hz
+    scheduler_hz: 2.0          # 行为调度 2Hz
+  vocal_cooldown_s: 45.0       # §9.1 发声念头全局冷却（文档 18s，实测偏频繁已放宽）
+  wandering_cooldown_s: 90.0   # wandering 发呆模式冷却
+  thought_ttl_s: 5.0           # §9.2 念头最大存活
+  social_vocal_threshold: 7.5  # 想找人说话的触发阈值（0~10，越高越稀有；本体行为不受限）
+  energy_min_vocal: 2.5        # §9.3 精力下限：低于则念头不发声（犯困）
+  sleep_energy: 2.5            # §2.2 精力低于则注意力切 rest（犯困闭眼）
+  wandering_enter_s: 45.0      # 安静多久进入 wandering 发呆
+  idle_motion_interval_s: 30.0 # 待机物理微动作最小间隔（活感主要由眼睛表情表达）
+  action_backend: "mock"       # §7.1 mock=PC 原型 | ros2=阶段2
+  # WebSocket 推送：窗口端内嵌服务，静态监控页（web/monitor.html）直接订阅
+  # 部署形态 = 只跑窗口进程；Docker 部署时仅需暴露该端口
+  ws_host: "0.0.0.0"           # 监听地址（docker 里用 0.0.0.0）
+  ws_port: 8848                # 监听端口
+  # 联想链念头（机制 1）：承接式续想——引用上文与记忆的连续思想流
+  chain:
+    enabled: true
+    chain_prob: 0.01           # 每次念头评估的触发概率（实测过频先调这里）
+    chain_cooldown_s: 90.0     # 两次联想的最小间隔
+    require_idle: true         # 仅 IDLE 且精力充足时触发
+    min_energy: 3.0            # 犯困不触发
+    vocal_prob: 0.3            # 联想念头转发声的概率（其余仅内心留痕）
+    max_tokens: 60
+    timeout_s: 12.0            # LLM 渲染超时（超时静默丢弃）
+
+# ---------------- 成长系统（GROWTH_DESIGN v0.2）----------------
+growth:
+  enabled: true
+  relationship:
+    enabled: true              # 关系阶段机总开关
+    stage_days: [0, 5, 30, 90] # S1→S4 各阶段要求的累计互动天数
+    stage_milestones: [0, 1, 2, 3]  # 各阶段要求的里程碑数
+    min_affection_s4: 550      # S4 好感度门槛
+    regress_days: 30           # ≥N 天不联系回落一级
+    regress_floor: 2           # 回落不低于 S2（认过主不是陌生人）
+  plasticity:                  # 可塑性曲线：偏好演化步长系数（S1 婴儿→S4 成熟）
+    curve: [1.0, 0.6, 0.35, 0.15]
+    base_step: 0.08            # 基础步长（like/dislike 单位为档，0~10）
+    cap_offset: 3              # 偏好相对人格基线的最大偏移（±3 档）
+  expression:
+    enabled: true              # 高频表达拾取（模仿学习）
+    min_count: 3               # 出现 ≥N 次入库
+    max_len: 12                # 短语最大长度（字）
+    quote_per_session: 2       # 场景话术每会话引用上限（防滥用）
+  milestone:
+    enabled: true              # 里程碑总开关（M1~M7）
+    night_well_target: 100     # M6：第 N 次晚安
 
 # ---------------- 视觉 ----------------
 vision:

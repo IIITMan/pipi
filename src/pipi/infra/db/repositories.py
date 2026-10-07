@@ -286,6 +286,60 @@ class MemoryRepo:
         item.decay_lambda = row["decay_lambda"]
         return item
 
+    def list_story(self, user_id: str, limit: int = 10) -> list[str]:
+        """story 标签的记忆（成长/联想链用），按显著性排序。"""
+        rows = self.db.query(
+            "SELECT content FROM memories "
+            "WHERE user_id=? AND deleted_at IS NULL "
+            "AND json_extract(meta, '$.story')=1 "
+            "ORDER BY salience DESC LIMIT ?",
+            (user_id, limit),
+        )
+        return [r["content"] for r in rows]
+
+    def mark_story(self, memory_id: str, now: float) -> None:
+        """给一条记忆打上 story 标签（成长故事沉淀）。"""
+        item = self.get(memory_id)
+        if not item:
+            return
+        meta = dict(item.meta or {})
+        meta["story"] = True
+        item.meta = meta
+        item.pinned = True
+        item.updated_at = now
+        self.update(item)
+
+    def stats(self, user_id: str) -> dict[str, Any]:
+        """相处统计：互动轮次 / 相识天数 / 里程碑数。"""
+        import time as _t
+
+        row = self.db.query_one(
+            "SELECT total_turns, met_at FROM users WHERE id=?", (user_id,))
+        turns = int((row or {}).get("total_turns") or 0)
+        met_at = float((row or {}).get("met_at") or 0)
+        days = int((_t.time() - met_at) / _DAY) if met_at else 0
+        ms = self.db.query_one(
+            "SELECT COUNT(*) AS c FROM growth_milestones WHERE user_id=?",
+            (user_id,))
+        return {
+            "turns": turns,
+            "days": max(0, days),
+            "milestones": int((ms or {}).get("c") or 0),
+        }
+
+    def stats(self, user_id: str) -> dict[str, Any]:
+        """相处统计：互动轮次 / 相识天数 / 里程碑数。"""
+        row = self.db.query_one(
+            "SELECT total_turns, met_at FROM users WHERE id=?", (user_id,))
+        turns = int((row or {}).get("total_turns") or 0)
+        met_at = float((row or {}).get("met_at") or 0)
+        return {
+            "turns": turns,
+            "days": 0,
+            "milestones": 0,
+            "stage": 1,
+        }
+
 
 # ---------------------------------------------------------------------------
 # 对话
@@ -551,3 +605,68 @@ class KVRepo:
                 "ON CONFLICT(k) DO UPDATE SET v=excluded.v, updated_at=excluded.updated_at",
                 (key, value, now),
             )
+
+
+class GrowthRepo:
+    """成长系统仓储：里程碑 + 演化日志（GROWTH_DESIGN §3）。"""
+
+    def __init__(self, db: Database):
+        self.db = db
+
+    # ---- 里程碑 ----
+
+    def has_milestone(self, user_id: str, code: str) -> bool:
+        return self.db.query_one(
+            "SELECT 1 FROM growth_milestones WHERE user_id=? AND code=?",
+            (user_id, code)) is not None
+
+    def add_milestone(self, user_id: str, code: str, text: str, now: float) -> bool:
+        """幂等写入：已存在（UNIQUE 冲突）返回 False；其他异常记日志。"""
+        import logging as _log
+
+        try:
+            with self.db.conn as conn:
+                conn.execute(
+                    "INSERT INTO growth_milestones (user_id, code, text, created_at) "
+                    "VALUES (?,?,?,?)",
+                    (user_id, code, text, now),
+                )
+            return True
+        except Exception as exc:
+            _log.getLogger(__name__).warning(
+                "add_milestone(%s, %s) 失败：%s", user_id, code, exc)
+            return False
+
+    def list_milestones(self, user_id: str) -> list[dict]:
+        rows = self.db.query(
+            "SELECT code, text, created_at FROM growth_milestones "
+            "WHERE user_id=? ORDER BY created_at",
+            (user_id,),
+        )
+        return [dict(r) for r in rows]
+
+    # ---- 演化日志 ----
+
+    def add_log(self, user_id: str, kind: str, detail: dict, now: float) -> None:
+        with self.db.conn as conn:
+            conn.execute(
+                "INSERT INTO growth_log (user_id, kind, detail, created_at) "
+                "VALUES (?,?,?,?)",
+                (user_id, kind, json.dumps(detail, ensure_ascii=False), now),
+            )
+
+    def list_log(self, user_id: str, limit: int = 50) -> list[dict]:
+        rows = self.db.query(
+            "SELECT kind, detail, created_at FROM growth_log "
+            "WHERE user_id=? ORDER BY created_at DESC LIMIT ?",
+            (user_id, limit),
+        )
+        out = []
+        for r in rows:
+            try:
+                detail = json.loads(r["detail"])
+            except (json.JSONDecodeError, TypeError):
+                detail = {}
+            out.append({"kind": r["kind"], "detail": detail,
+                        "created_at": r["created_at"]})
+        return out

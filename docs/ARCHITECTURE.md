@@ -145,8 +145,9 @@
 │   │   └── rockchip/             #   RK3588 实现（预留）
 │   ├── interfaces/               # L5
 │   │   ├── cli.py                #   命令行
-│   │   ├── web.py                #   FastAPI + SSE
-│   │   └── web_static/index.html #   单文件前端（零构建）
+│   │   ├── web.py                #   FastAPI + SSE（遗留模式）
+│   │   └── ws_server.py          #   窗口端 WebSocket 推送中枢
+│   └── web/                       #   静态页面（双击即开，订阅 WS）
 │   └── prompts/                  # *.jinja 模板
 └── data/                         # 运行时数据（DB / 模型 / 人脸）
 ```

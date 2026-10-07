@@ -63,6 +63,7 @@ class Repos:
     decay: DecayRepo
     face: FaceRepo
     kv: KVRepo
+    growth: "GrowthRepo"
 
 
 @dataclass
@@ -131,6 +132,8 @@ def load_persona(cfg: Config) -> PersonaSpec:
 
 
 def build_repos(db: Database) -> Repos:
+    from pipi.infra.db.repositories import GrowthRepo
+
     return Repos(
         user=UserRepo(db),
         profile=ProfileRepo(db),
@@ -141,6 +144,7 @@ def build_repos(db: Database) -> Repos:
         decay=DecayRepo(db),
         face=FaceRepo(db),
         kv=KVRepo(db),
+        growth=GrowthRepo(db),
     )
 
 
@@ -406,6 +410,15 @@ def build_app(cfg: Config | None = None, *, sim: bool = False,
     owner_name = profile.display_name if not profile.is_new() else "主人"
     pb = PromptBuilder(persona, owner_name=owner_name)
 
+    # 成长引擎（可成长性；关闭时 orchestrator.growth 为 None）
+    growth_engine = None
+    if cfg.get("growth.enabled", True):
+        from pipi.orchestration.growth import GrowthEngine
+
+        growth_engine = GrowthEngine(cfg, repos, memory_mgr, clk)
+        growth_engine.persona_like = list(persona.speech_style.catchphrases or [])
+        growth_engine.persona_like += list(getattr(persona, "likes", []) or [])
+
     # Agent
     emotion_analyst = EmotionAnalyst(engine)
     memory_expert = MemoryExpert(memory_mgr, top_k=cfg.get("memory.top_k", 5))
@@ -413,6 +426,7 @@ def build_app(cfg: Config | None = None, *, sim: bool = False,
         llm, pb,
         use_cheap_routing=cfg.get("llm.routing.enabled", True),
         simple_max_chars=cfg.get("llm.routing.simple_max_chars", 8),
+        growth=growth_engine,
     )
 
     # 编排器
@@ -426,6 +440,7 @@ def build_app(cfg: Config | None = None, *, sim: bool = False,
         turn_repo=repos.turn, emotion_repo=repos.emotion,
         tts=app_ctx.get("tts"), motion=app_ctx.get("motion"),
         owner_name=owner_name,
+        growth=growth_engine,
     )
 
     # 主动引擎

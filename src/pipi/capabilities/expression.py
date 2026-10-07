@@ -38,6 +38,19 @@ AI_PHRASES = [
 # 句末标点（用于切分气泡）
 _SENT_END = re.compile(r"(?<=[。！？!?…；;])")
 
+# 舞台指示（表情/动作/心理描写）——这些是给眼睛做的，不该被念出来
+_STAGE_PARENS = re.compile(r"[（(][^（）()]*[)）]")
+_EMOJI = re.compile(
+    "[" 
+    "\U0001F000-\U0001FAFF"    # 各类 emoji 主区
+    "\U00002600-\U000027BF"    # 杂项符号与装饰
+    "\U00002B00-\U00002BFF"    # 箭头星形等
+    "\U0001F1E6-\U0001F1FF"    # 区域旗帜
+    "\uFE0F\u200D"             # 变体选择符与零宽连接符
+    "]+",
+    re.IGNORECASE,
+)
+
 
 def strip_markdown(text: str) -> str:
     """去掉 Markdown 痕迹 —— 聊天窗口里不该出现这些。"""
@@ -63,6 +76,25 @@ def strip_ai_phrases(text: str) -> str:
     # 清理因删除产生的开头空白和多余标点
     t = re.sub(r"^[，。、\s]+", "", t)
     t = re.sub(r"[，]{2,}", "，", t)
+    return t.strip()
+
+
+def strip_stage_directions(text: str) -> str:
+    """去掉舞台指示 —— （眼眶红红的）、*动作*、emoji 表情。
+
+    这些是「给眼睛/屏幕看的描写」，念出来非常出戏：
+    TTS 会把「（大颗大颗的眼泪啪嗒啪嗒往下掉）」当台词读。
+    """
+    if not text:
+        return ""
+    t = _STAGE_PARENS.sub("", text)     # 全/半角括号内容（动作/神态/心理）
+    t = re.sub(r"\*([^*]+)\*", r"\1", t)  # *动作* 斜体动作残留
+    t = _EMOJI.sub("", t)               # emoji 表情
+    # 清理删除后的残留空白与孤立标点
+    t = re.sub(r"[ \t]{2,}", " ", t)
+    t = re.sub(r"^[，。、~～\s]+", "", t)
+    t = re.sub(r"[，、]{2,}", "，", t)
+    t = re.sub(r"([！？。…])\s*[~～]+\s*", r"\1", t)
     return t.strip()
 
 
@@ -173,6 +205,11 @@ def postprocess(
     if stripped != text:
         reasons.append("去AI腔")
     text = stripped
+
+    cleaned = strip_stage_directions(text)
+    if cleaned != text:
+        reasons.append("去舞台指示")
+    text = cleaned
 
     if style:
         if len(text) > style.max_sentence_chars * style.max_bubbles:

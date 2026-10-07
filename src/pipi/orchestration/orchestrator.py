@@ -92,6 +92,7 @@ class ConversationOrchestrator:
         motion: Any | None = None,
         owner_name: str = "主人",
         enable_proactive_emotion: bool = True,
+        growth: Any | None = None,
     ):
         self.llm = llm
         self.persona = persona
@@ -108,6 +109,7 @@ class ConversationOrchestrator:
         self.motion = motion
         self.owner_name = owner_name
         self.enable_proactive_emotion = enable_proactive_emotion
+        self.growth = growth   # GrowthEngine（可成长性，可为 None）
 
         # 会话缓存
         self._sessions: dict[str, Session] = {}
@@ -280,6 +282,7 @@ class ConversationOrchestrator:
                              persist: bool, now: float,
                              profile: UserProfile) -> TurnResult:
         """回合收尾：后处理/气泡/动作/会话记录/异步持久化。"""
+        raw_text = self._strip_reasoning(raw_text)
         pp: PostProcessResult = postprocess(raw_text, self.persona.speech_style)
         voice_emotion = "neutral"
         if self.enable_proactive_emotion and ctx.emotion_state:
@@ -350,6 +353,12 @@ class ConversationOrchestrator:
                     if not profile.is_owner and profile.nickname:
                         profile.is_owner = True
                         self.user_repo.update(user_id, is_owner=1)
+                        # 成长系统 M1：认主（A4）
+                        if self.growth is not None:
+                            try:
+                                await self.growth.record_milestone(user_id, "M1", now)
+                            except Exception as exc:
+                                logger.warning("M1 记录失败：%s", exc)
         except Exception as exc:
             logger.error("记忆写入失败：%s", exc)
 
@@ -378,6 +387,11 @@ class ConversationOrchestrator:
             asyncio.current_task()._written = written  # type: ignore[attr-defined]
         except Exception:
             pass
+
+        # 6. 成长引擎（单向写入：异常已在其内部吞掉）
+        if self.growth is not None:
+            await self.growth.on_turn(
+                user_id, user_text, ctx.emotion_state, now=now)
 
     # ------------------------------------------------------------------
     # 主动搭话
@@ -445,6 +459,25 @@ class ConversationOrchestrator:
     # ------------------------------------------------------------------
     # 辅助
     # ------------------------------------------------------------------
+
+    _REASONING_MARKERS = ("首先", "其次", "比如", "按照", "性格来回应",
+                          "我应该", "要符合", "既", "分析", "思路")
+
+    def _strip_reasoning(self, text: str) -> str:
+        """思考腔泄漏防护：模型偶发把解题过程当答案输出（尤其 lite 档）。
+
+        特征：多段落 + 推理特征词。命中时取最后一个自然段——
+        那通常才是真正的台词。
+        """
+        if "\n" not in text:
+            return text
+        hits = sum(1 for k in self._REASONING_MARKERS if k in text)
+        if hits >= 2 or len(text) > 400:
+            paras = [p.strip() for p in text.split("\n") if p.strip()]
+            if len(paras) > 1:
+                logger.warning("检测到思考腔泄漏（%d 特征），截取末段", hits)
+                return paras[-1]
+        return text
 
     def _fallback_reply(self, error: str) -> str:
         """LLM 失败时的兜底话术 —— 保证皮皮不沉默。"""

@@ -250,12 +250,20 @@ class SentenceTTSPlayer:
         from pipi.providers.tts.base import TTSRequest
 
         buf = bytearray()
-        try:
-            async for chunk in self.tts.synthesize(TTSRequest(text=text)):
-                if chunk.pcm:
-                    buf.extend(chunk.pcm)
-        except Exception as exc:
-            logger.warning("分段合成失败：%s", exc)
+        # edge-tts 偶发 "No audio was received"，重试一次
+        for attempt in (1, 2):
+            buf = bytearray()
+            try:
+                async for chunk in self.tts.synthesize(TTSRequest(text=text)):
+                    if chunk.pcm:
+                        buf.extend(chunk.pcm)
+                if buf:
+                    break
+                logger.warning("第 %d 次合成为空：%r", attempt, text[:20])
+            except Exception as exc:
+                logger.warning("分段合成失败（第 %d 次）：%s", attempt, exc)
+            if attempt == 1:
+                await asyncio.sleep(0.6)
         return bytes(buf)
 
     async def _play(self, mp3: bytes) -> None:

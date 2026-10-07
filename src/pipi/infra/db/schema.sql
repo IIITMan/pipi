@@ -21,8 +21,35 @@ CREATE TABLE IF NOT EXISTS users (
     last_seen       REAL DEFAULT 0,
     total_turns     INTEGER DEFAULT 0,
     affection       REAL DEFAULT 500,
-    persona_id      TEXT DEFAULT 'tsundere'
+    persona_id      TEXT DEFAULT 'tsundere',
+    -- 成长系统（A1）：关系阶段主刻度
+    relationship_stage      INTEGER DEFAULT 1,
+    stage_since             REAL DEFAULT 0,
+    meet_date               REAL DEFAULT 0,
+    nickname_authorized     INTEGER DEFAULT 0
 );
+
+-- ---------------- 成长里程碑（A1）----------------
+-- 命中即写入，同时沉淀为 commitment/story 型记忆（与 memories 互引）
+CREATE TABLE IF NOT EXISTS growth_milestones (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     TEXT NOT NULL,
+    code        TEXT NOT NULL,              -- M1~M7
+    text        TEXT DEFAULT '',
+    created_at  REAL NOT NULL,
+    UNIQUE(user_id, code)                   -- 幂等：重复触发不重复写
+);
+
+-- ---------------- 成长日志（A1）----------------
+-- 所有演化事件留痕（kind: stage_change/preference/milestone/expression/nickname）
+CREATE TABLE IF NOT EXISTS growth_log (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     TEXT NOT NULL,
+    kind        TEXT NOT NULL,
+    detail      TEXT DEFAULT '{}',
+    created_at  REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_growth_log_user ON growth_log(user_id, created_at DESC);
 
 -- ---------------- L1 身份档案 ----------------
 CREATE TABLE IF NOT EXISTS profiles (

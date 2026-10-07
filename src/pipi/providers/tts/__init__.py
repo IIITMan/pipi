@@ -14,6 +14,23 @@ logger = logging.getLogger(__name__)
 
 
 def create_tts(name: str, cfg: Any) -> TTSProvider | None:
+    if name == "ark_tts":
+        from pipi.providers.tts.ark import ArkTTS
+
+        sub = cfg.get("audio.tts.ark_tts", {}) if hasattr(cfg, "get") else {}
+        p = ArkTTS(
+            api_key=sub.get("api_key", ""),
+            resource_id=sub.get("resource_id", "seed-tts-2.0"),
+            speaker=sub.get("speaker", "zh_female_vv_uranus_bigtts"),
+            model=sub.get("model", ""),
+            sample_rate=sub.get("sample_rate", 24000),
+            bitrate=sub.get("bitrate", 160000),
+            emotion_instruction=sub.get("emotion_instruction", True),
+            cache_enabled=sub.get("cache_enabled", True),
+            cache_dir=sub.get("cache_dir", "data/tts_cache"),
+        )
+        return p if p.is_available() else None
+
     if name == "cosyvoice":
         sub = cfg.get("audio.tts.cosyvoice", {}) if hasattr(cfg, "get") else {}
         p = CosyVoiceTTS(
@@ -41,6 +58,6 @@ def create_mock_tts() -> MockTTS:
 
 __all__ = [
     "TTSProvider", "TTSRequest", "AudioChunk",
-    "CosyVoiceTTS", "EdgeTTS", "MockTTS",
+    "ArkTTS", "CosyVoiceTTS", "EdgeTTS", "MockTTS",
     "create_tts", "create_mock_tts",
 ]

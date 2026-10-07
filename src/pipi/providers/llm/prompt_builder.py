@@ -94,6 +94,13 @@ class PromptBuilder:
             lines.append("- 你好奇心重，会追着问细节。")
         if t.verbosity <= 0.35:
             lines.append("- 你惜字如金，能三个字说完绝不用五个字。")
+        # 输出格式硬规则：这些话会被语音合成念出来
+        lines.append(
+            "- 你的回复会被转成语音念出来，只写台词本身："
+            "禁止任何括号内容（动作/神态/心理描写，如「（眼眶红红的）」「（蹭蹭你）」），"
+            "禁止 emoji 表情，禁止「大颗眼泪往下掉」这类画面描写。"
+            "情绪用语气词、标点和说话方式表达，不用表演动作。"
+        )
         return "\n".join(lines)
 
     def build_messages(

@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 import re
 import time
 from collections import deque
@@ -352,10 +353,12 @@ class InteractionSession:
                  on_query: Callable[[str], Awaitable[None]] | None = None,
                  on_interrupt: Callable[[], Any] | None = None,
                  wake_ack: str = "嗯，我在。",
-                 cfg: Any | None = None, verbose: bool = False):
+                 cfg: Any | None = None, verbose: bool = False,
+                 life: Any | None = None):
         self.asr = asr
         self.capture = capture
         self.tts = tts
+        self.life = life
         self.on_query = on_query
         self.on_interrupt = on_interrupt
         self.wake_ack = wake_ack
@@ -367,6 +370,11 @@ class InteractionSession:
         self.barge_min_ms = cfg.get("audio.mic.session.barge_in_min_ms", 200)
         self.barge_arm_s = cfg.get("audio.mic.session.barge_in_arm_s", 0.6)
         self.barge_mult = cfg.get("audio.mic.session.barge_in_multiplier", 1.6)
+
+        # 唤醒应答预热：后台提前合成并缓存，首次唤醒即零延迟
+        prewarm = getattr(self.tts, "prewarm", None)
+        if prewarm is not None:
+            asyncio.create_task(self._safe_prewarm(prewarm))
 
         self.vad = make_vad(capture, cfg)
         self.kws = make_kws(
@@ -388,14 +396,108 @@ class InteractionSession:
         self._loud_frames = 0
         self._ignore_until = 0.0
         self._wake_hit = False
+        self._exit_pending = False             # 退出意图：告别播完即回待机
         self._pending: list[np.ndarray] = []   # 应答期间缓冲的音频（打断时保话头）
         self._seg_start = 0
+        # 预录缓冲：VAD 触发前先攒着最近 N 帧，段开始时补进去，防首字被截
+        pre_frames = max(int(float(cfg.get("audio.mic.pre_roll_s", 0.32)) / 0.032), 1)
+        self._pre_frames: deque = deque(maxlen=pre_frames)
+
+        # 语音退出短语（§3 idle/sleep 切换的语音出口）
+        self.exit_phrases = tuple(cfg.get("audio.mic.exit_phrases",
+                                          ["退下", "别说话了", "闭嘴", "别出声",
+                                           "安静会儿", "安静一会", "走开",
+                                           "别烦我", "不用你了", "你可以走了",
+                                           "歇着吧"]))
+        self.exit_farewells = tuple(cfg.get("audio.mic.exit_farewells",
+                                            ["哼，那我走啦，想我了就喊我。",
+                                             "好吧……那我去那边待着，不打扰你。",
+                                             "嗯，那我不出声了，需要我的时候喊我哦。",
+                                             "行吧行吧，反正你肯定会想我的。"]))
 
     # ------------------------------------------------------------------
 
     def _notify(self, msg: str) -> None:
         if self.verbose:
             print(msg, flush=True)
+
+    @property
+    def is_busy(self) -> bool:
+        """会话是否忙（对话/机器人说话/正在收集用户语音）。"""
+        return self.state != self.IDLE or self._seg_active
+
+    # ------------------------------------------------------------------
+    # 生命模块接入：自发念头发声（走现有 TTS + Barge-in 通道）
+    # ------------------------------------------------------------------
+
+    def try_speak_spontaneous(self, text: str) -> bool:
+        """空闲时让皮皮说一句自发念头。返回 False 表示此刻不方便。"""
+        if self.state != self.IDLE or self._seg_active:
+            return False
+        self.state = self.RESPOND
+        self._resp_started = time.monotonic()
+        self._loud_frames = 0
+        self._pending = []
+        self._resp_task = asyncio.create_task(self._speak_spontaneous(text))
+        return True
+
+    # -- 语音退出 ------------------------------------------------------
+
+    def _is_exit_intent(self, text: str) -> bool:
+        """判断是否退出意图（短语子串匹配，限短句防误触）。"""
+        if not text or len(text) > 15:
+            return False
+        hit = any(p in text for p in self.exit_phrases)
+        if self.verbose:
+            print(f"  [exit-check] {text!r} → {hit}")
+        return hit
+
+    def _start_farewell(self) -> None:
+        """播一句告别 → 播完自动回待机（期间可被 Barge-in 打断）。"""
+        if self.verbose:
+            print("  [exit] start_farewell")
+        self.state = self.RESPOND
+        self._resp_started = time.monotonic()
+        self._loud_frames = 0
+        self._exit_pending = True
+        self._pending = []
+        self._resp_task = asyncio.create_task(
+            self._speak_line(random.choice(self.exit_farewells)))
+
+    def _go_idle(self, now: float) -> None:
+        """回待机：只留 KWS，等下一次唤醒。"""
+        self.state = self.IDLE
+        self._seg = []
+        self._seg_active = False
+        self._wake_hit = False
+        self._exit_pending = False
+        self._pending = []
+        self._seg_start = 0
+        self.vad.reset()
+        self.kws.reset()
+        self._pre_frames.clear()
+        self._ignore_until = now + 0.4
+        if self.life is not None:
+            self.life.on_farewell()   # 告别计入念叨冷却，防止退出后立刻自言自语
+        self._notify("  💤 已回待机（再喊唤醒词继续）")
+
+    async def _speak_spontaneous(self, text: str) -> None:
+        await self._speak_line(text, prefix="皮皮（自言自语）> ")
+
+    async def _speak_line(self, text: str, prefix: str = "皮皮 > ") -> None:
+        self._notify(f"{prefix}{text}")
+        if self.tts is not None:
+            from pipi.interfaces.voice import SentenceTTSPlayer
+
+            speaker = SentenceTTSPlayer(self.tts)
+            self._speaker = speaker
+            try:
+                await speaker.feed(text)
+                await speaker.finish()
+            finally:
+                self._speaker = None
+        else:
+            print(f"{prefix}{text}", flush=True)
 
     async def run(self) -> None:
         """主循环：麦克风帧泵 + 状态机。"""
@@ -467,8 +569,9 @@ class InteractionSession:
             self._notify("  🔑 检测到唤醒词…（说完需求或停顿即可）")
 
         ev = self.vad.process(frame)
-        if ev == "start":
-            self._seg = [frame]
+        if ev == "start" and not self._seg_active:
+            self._seg = list(self._pre_frames) + [frame]   # 预录补头，防首字丢失
+            self._pre_frames.clear()
             self._seg_active = True
         elif self._seg_active:
             self._seg.append(frame)
@@ -477,6 +580,8 @@ class InteractionSession:
                 self._seg = []
                 self._seg_active = False
                 await self._finish_idle_segment(seg)
+        else:
+            self._pre_frames.append(frame)
 
     async def _finish_idle_segment(self, seg: list[np.ndarray]) -> None:
         """待机段结束：KWS 命中过才识别，否则丢弃。"""
@@ -505,6 +610,12 @@ class InteractionSession:
         text = (t.text or "").strip()
         self._notify(f"  🎤 {text or '(空)'}")
 
+        # 唤醒段里的退出意图（「皮皮，退下吧」）
+        if self._is_exit_intent(text):
+            self._notify("  👋 退出对话，回待机")
+            self._start_farewell()
+            return
+
         # KWS 已在声学层命中，ASR 文本只用来剥离唤醒词拿正文
         _hit, rest = match_wake(text, self.wake_words)
         if rest:
@@ -526,6 +637,8 @@ class InteractionSession:
         level = _rms(frame)
         if level >= self.capture.threshold:
             self._last_voice = now
+            if self.life is not None:
+                self.life.observe_user_voice()
 
         # 会话超时：安静太久回待机
         if now - self._last_voice > self.timeout_s and not self._seg_active:
@@ -538,7 +651,8 @@ class InteractionSession:
 
         ev = self.vad.process(frame)
         if ev == "start" and not self._seg_active:
-            self._seg = [frame]
+            self._seg = list(self._pre_frames) + [frame]   # 预录补头，防首字丢失
+            self._pre_frames.clear()
             self._seg_active = True
         elif self._seg_active:
             self._seg.append(frame)
@@ -547,6 +661,8 @@ class InteractionSession:
                 self._seg = []
                 self._seg_active = False
                 await self._on_segment(seg)
+        else:
+            self._pre_frames.append(frame)
 
     async def _on_segment(self, seg: list[np.ndarray]) -> None:
         """一句话说完 → 识别 → 进入应答。"""
@@ -575,6 +691,13 @@ class InteractionSession:
             self._notify(f"  （噪声丢弃：{text!r}）")
             return
         self._notify(f"  🎤 {text}")
+
+        # 退出意图：告别一句 → 回待机
+        if self._is_exit_intent(text):
+            self._notify("  👋 退出对话，回待机")
+            self._start_farewell()
+            return
+
         self.state = self.RESPOND
         self._resp_started = time.monotonic()
         self._loud_frames = 0
@@ -604,6 +727,11 @@ class InteractionSession:
 
         # 应答自然结束 → 回聆听（重置计时，防立刻超时）
         if task is None or task.done():
+            if self._exit_pending:
+                self._go_idle(now)
+                return
+            if self.life is not None:
+                self.life.on_response_done()
             self._back_to_listen(now)
             return
 
@@ -628,6 +756,8 @@ class InteractionSession:
 
     def _do_barge_in(self, now: float) -> None:
         self._notify("  ✋ 打断！停播、听你说…")
+        if self.life is not None:
+            self.life.on_barge_in()
         if self._resp_task is not None:
             self._resp_task.cancel()
             self._resp_task = None
@@ -646,7 +776,9 @@ class InteractionSession:
         self._seg_start = 0
         self._seg_active = True
         self._last_voice = now
-        self._ignore_until = 0.0   # 立即监听，不再丢 0.4s
+        self._exit_pending = False   # 用户插话=改主意了，取消退出
+        self._pre_frames.clear()
+        self._ignore_until = 0.0     # 立即监听，不再丢 0.4s
 
     def _back_to_listen(self, now: float) -> None:
         self.state = self.LISTEN
@@ -656,9 +788,17 @@ class InteractionSession:
         self._seg_start = 0
         self._seg_active = False
         self._wake_hit = False
+        self._exit_pending = False
+        self._pre_frames.clear()
         self.vad.reset()
         # 播放尾音回声保护
         self._ignore_until = now + 0.4
+
+    async def _safe_prewarm(self, prewarm) -> None:
+        try:
+            await prewarm(self.wake_ack)
+        except Exception as exc:
+            logger.warning("唤醒应答预热失败（首次唤醒改为实时合成）：%s", exc)
 
     async def _play_ack(self) -> None:
         if self.tts is None or not self.wake_ack:
@@ -674,4 +814,5 @@ class InteractionSession:
         self._last_voice = now
         self._seg = []
         self._seg_active = False
+        self._pre_frames.clear()
         self.vad.reset()

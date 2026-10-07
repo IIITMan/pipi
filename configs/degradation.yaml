@@ -13,10 +13,10 @@ capabilities:
     chain: ["sensevoice", "cloud_dashscope", "mock"]
     description: "SenseVoice 本地推理不可用时退到云 API，最后退到键盘输入"
 
-  # 语音合成：本地 → 免费的 edge-tts → 云 → 只打印
+  # 语音合成：豆包语音合成 2.0（真流式+情感）→ 本地 → 免费的 edge-tts → 只打印
   tts:
-    chain: ["cosyvoice", "edge_tts", "cloud_openai", "mock"]
-    description: "无 GPU 时 edge-tts 是最佳性价比兜底"
+    chain: ["ark_tts", "cosyvoice", "edge_tts", "cloud_openai", "mock"]
+    description: "ark_tts 首选（真流式、情感演绎）；edge-tts 是免费兜底"
 
   # 大模型：主云端 → 备用云 API → 规则回复（纯云端方案，不做本地部署）
   #

@@ -34,6 +34,7 @@ HELP = """
   /status    情绪与好感度
   /memory    查看记住的东西
   /decay     手动跑一次遗忘巡检
+  /growth    查看成长档案（阶段/里程碑/偏好）
   /proactive 让皮皮主动说句话
   /reset     清空记忆（不可恢复）
   /forget N  删除第 N 条记忆（先用 /memory 看编号）
@@ -61,6 +62,8 @@ class CLI:
         self._vloop: Any | None = None
         self._session: Any | None = None
         self._speaker: Any | None = None
+        self._hub: Any | None = None
+        self._chat_lock: asyncio.Lock | None = None
         if (mic or voice) and app.asr is not None:
             try:
                 from pipi.providers.asr.mic import MicCapture
@@ -149,10 +152,80 @@ class CLI:
             on_interrupt=self._on_barge_in,
             cfg=self.app.cfg, verbose=self.verbose,
         )
+
+        # 生命模块（自发念头/生理状态）——空闲时皮皮会自言自语
+        self._life = None
+        if self.app.cfg.get("life.enabled", True) and self.app.asr is not None:
+            import random as _random
+
+            from pipi.life import LifeEngine
+
+            persona = self.app.persona
+            bot_name = self.app.cfg.get("persona.bot_name", "皮皮")
+            self._life = LifeEngine(
+                cfg=self.app.cfg,
+                llm=self.app.llm,
+                persona_name=bot_name,
+                persona_hint=f"{bot_name}，{persona.name}人格（{persona.id}），语气傲娇但内心黏人",
+                memory_getter=lambda: (
+                    (lambda items: _random.choice(items).content if items else None)(
+                        self.app.repos.memory.list_live(self.user_id))
+                ),
+                session=self._session,
+            )
+            # C4：联想链优先引用 story 记忆（成长故事闪回）
+            def _story_getter():
+                items = self.app.repos.memory.list_story(self.user_id, limit=5)
+                return _random.choice(items) if items else None
+
+            self._life.story_getter = _story_getter
+            self._session.life = self._life
+            self._life.start()
+            if self.verbose:
+                import logging as _logging
+                _logging.getLogger("pipi.life").setLevel(_logging.INFO)
+            print("  🫀 生命模块已启动（空闲时会自发念叨、微动作）")
+
+        # WebSocket 推送：静态监控页直接订阅，无需启动任何 Web 服务
+        self._chat_lock = asyncio.Lock()
+        ws_port = self.app.cfg.get("life.ws_port", 8848)
+        ws_host = self.app.cfg.get("life.ws_host", "127.0.0.1")
+        try:
+            from pipi.interfaces.ws_server import WSHub
+
+            self._hub = WSHub(ws_host, ws_port, on_chat=self._on_remote_chat)
+            await self._hub.start()
+            if self._life is not None:
+                # E1：快照并入成长面板数据（growth 引擎存在时）
+                growth = getattr(self.app.orchestrator, "growth", None)
+
+                def _sink(payload: dict, _g=growth) -> None:
+                    snap = payload.get("snapshot")
+                    if snap is not None and _g is not None:
+                        try:
+                            snap["growth"] = _g.snapshot(self.user_id)
+                        except Exception:
+                            pass
+                    self._hub.publish(payload)
+
+                self._life.set_sink(_sink)
+            print(f"  📡 监控数据推送 ws://{ws_host}:{ws_port}/ws"
+                  f"（双击打开 web/monitor.html 即可查看）")
+        except Exception as exc:
+            print(f"  （WebSocket 推送不可用：{exc}）")
+
         try:
             await self._session.run()
         except (KeyboardInterrupt, asyncio.CancelledError):
             print("\n皮皮 > 那你走吧……哼")
+        finally:
+            if self._hub is not None:
+                try:
+                    await self._hub.stop()
+                except Exception:
+                    pass
+            if self._life is not None:
+                await self._life.stop()
 
     def _on_barge_in(self) -> None:
         """打断：立即停止 TTS 播放并清空缓冲。"""
@@ -164,8 +237,18 @@ class CLI:
         """应答：LLM 流式 → 逐字显示 + 分句 TTS 边生成边播放。"""
         import time as _time
 
+        if self._chat_lock is None:
+            self._chat_lock = asyncio.Lock()
+        async with self._chat_lock:
+            await self._respond_stream_locked(text)
+
+    async def _respond_stream_locked(self, text: str) -> None:
+        import time as _time
+
         t0 = _time.perf_counter()
         self.app.proactive_engine.note_user_response(self.app.clock.now())
+        if self._life is not None:
+            self._life.log_chat("user", text)
 
         speaker = None
         if self.app.tts is not None:
@@ -191,6 +274,12 @@ class CLI:
         else:
             for b in result.bubbles:
                 print(f"皮皮 > {b.text}", flush=True)
+        if self._life is not None:
+            for b in result.bubbles:
+                self._life.log_chat("pipi", b.text)
+            if result.emotion_state is not None:
+                self._life.physio.observe_dialogue_mood(
+                    result.emotion_state.mood.value)
 
         if self.verbose:
             llm = getattr(self.app.llm, "last_latency_ms", 0)
@@ -211,6 +300,28 @@ class CLI:
             total = (_time.perf_counter() - t0) * 1000
             print(f"  ⏱ 说话→回完 {total:.0f}ms ｜ 记忆已写入 "
                   f"{len(result.memories_written)} 条", flush=True)
+
+    async def _on_remote_chat(self, text: str) -> None:
+        """远程文本聊天（静态监控页发来）：与语音共享记忆，语音优先。"""
+        if self._chat_lock is None:
+            self._chat_lock = asyncio.Lock()
+        if self._chat_lock.locked():
+            if self._hub is not None:
+                self._hub.broadcast({"type": "busy",
+                                     "data": {"reason": "皮皮正在语音对话中，稍后再聊"}})
+            return
+        async with self._chat_lock:
+            if self._hub is not None:
+                self._hub.broadcast({"type": "thinking", "data": {}})
+            if self._life is not None:
+                self._life.log_chat("user", text)
+            result = await self.orch.handle_turn_stream(self.user_id, text)
+            if self._life is not None:
+                for b in result.bubbles:
+                    self._life.log_chat("pipi", b.text)
+                if result.emotion_state is not None:
+                    self._life.physio.observe_dialogue_mood(
+                        result.emotion_state.mood.value)
 
     async def _listen(self) -> str:
         import time as _time
@@ -289,6 +400,9 @@ class CLI:
             rep = await self.app.memory.decay(self.user_id, self.app.clock.now())
             print(f"  {rep.summary()}")
 
+        elif name == "/growth":
+            self._show_growth()
+
         elif name == "/proactive":
             await self._do_proactive()
 
@@ -326,6 +440,47 @@ class CLI:
         items = self.app.repos.memory.list_live(self.user_id)
         items.sort(key=lambda m: m.salience(now), reverse=True)
         return items
+
+    def _show_growth(self) -> None:
+        """B5：成长状态（阶段/里程碑/偏好/表达统计）。"""
+        import time as _time
+
+        growth = getattr(self.app.orchestrator, "growth", None)
+        if growth is None:
+            print("  成长系统未启用。")
+            return
+        gp = growth.load(self.user_id)
+        rel = growth._rel_cfg()
+        stage_days = rel.get("stage_days", [0, 5, 30, 90])
+        stage_ms = rel.get("stage_milestones", [0, 1, 2, 3])
+        curve = growth._curve()
+        print("  ┌─ 成长档案 ───────────────────")
+        print(f"  │ 阶段      S{gp.stage} {gp.stage_name}"
+              f"（可塑性 {gp.plasticity(curve):.2f}）")
+        gap = gp.next_stage_gap(stage_days, stage_ms, self.app.clock.now())
+        if gap.get("done"):
+            print("  │ 已到最终阶段")
+        else:
+            print(f"  │ 下一阶段  S{gap['next_stage']}"
+                  f"（还差 {gap['need_days']} 天 / {gap['need_milestones']} 个里程碑）")
+        ms = growth.repos.growth.list_milestones(self.user_id)
+        if ms:
+            for m in ms:
+                t = _time.strftime("%m-%d", _time.localtime(m["created_at"]))
+                print(f"  │ 里程碑    [{t}] {m['code']} {m['text'][:30]}")
+        else:
+            print("  │ 里程碑    暂无")
+        prefs = gp.preferences.get("like") or {}
+        for k, v in list(prefs.items())[:6]:
+            bar = "█" * int(v) + "░" * (10 - int(v))
+            print(f"  │ 偏好      {k} {bar} {v:.1f}")
+        expr = gp.learned_expressions
+        if expr:
+            top = sorted(expr.items(), key=lambda kv: -kv[1]["count"])[:5]
+            print(f"  │ 学到的口头禅：" + "、".join(
+                f"{k}×{v['count']}" for k, v in top))
+        print(f"  │ 相处      相识 {gp.active_days()} 天 · {gp.turns()} 轮对话")
+        print("  └─────────────────────────────")
 
     async def _forget_by_index(self, name: str) -> None:
         if not self.app.cfg.get("memory.allow_user_forget", True):

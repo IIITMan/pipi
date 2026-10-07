@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>皮皮 · 生命监控台</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root{--bg:#0f1220;--card:#1a1f33;--line:#2a3150;--txt:#e8ebf7;--dim:#8b93b8;
+        --pink:#ff7eb6;--blue:#6ea8ff;--green:#7ee2a8;--yellow:#ffd479}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--txt);font-family:"Microsoft YaHei",system-ui,sans-serif;padding:18px}
+  h1{font-size:20px;margin-bottom:4px}
+  .sub{color:var(--dim);font-size:12px;margin-bottom:14px}
+  #conn{display:inline-block;width:8px;height:8px;border-radius:50%;background:#e05555;
+        margin-right:6px;vertical-align:middle}
+  #conn.on{background:var(--green)}
+  .grid{display:grid;grid-template-columns:340px 1fr;gap:14px;align-items:start}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px}
+  .card h2{font-size:14px;color:var(--dim);font-weight:normal;margin-bottom:10px}
+  .facebox{display:flex;flex-direction:column;align-items:center;gap:8px}
+  #face{width:300px;height:190px}
+  .eye{fill:#7cc4f8;transition:all .3s ease}
+  .eyes-speaking{animation:talk .5s ease-in-out infinite alternate;transform-origin:center}
+  @keyframes talk{from{transform:scaleY(1)}to{transform:scaleY(.72)}}
+  #activity{width:100%;background:#10131f;border-radius:10px;padding:8px 12px;
+            font-size:12.5px;line-height:1.7;text-align:center}
+  #activity .now{color:var(--green)}
+  #activity .intent{color:var(--dim);font-style:italic}
+  #tears .tear{animation:fall 1.3s ease-in infinite}
+  #tears .t2{animation-delay:.35s} #tears .t4{animation-delay:.45s}
+  #tears .t3{animation-delay:.7s}
+  @keyframes fall{0%{transform:translateY(0);opacity:0}25%{opacity:1}
+                  100%{transform:translateY(30px);opacity:0}}
+  .badge{padding:3px 12px;border-radius:999px;font-size:13px;background:#2a3150}
+  .stat{margin:10px 0}
+  .stat .lbl{display:flex;justify-content:space-between;font-size:12px;color:var(--dim)}
+  .bar{height:8px;background:#10131f;border-radius:6px;overflow:hidden;margin-top:3px}
+  .bar i{display:block;height:100%;border-radius:6px;transition:width .5s}
+  .mood-bar i{background:linear-gradient(90deg,#6ea8ff,#ff7eb6)}
+  #summary{font-size:13px;color:var(--txt);background:#10131f;border-radius:10px;
+           padding:8px 12px;margin-top:10px;text-align:center}
+  .card.log{max-height:420px;overflow-y:auto}
+  .evt{padding:5px 8px;border-radius:8px;font-size:12.5px;margin-bottom:4px;line-height:1.5}
+  .evt .t{color:var(--dim);font-size:11px;margin-right:6px}
+  .evt.user{background:#20305c}
+  .evt.pipi{background:#3a2547}
+  .evt.inner{background:#1d2438;color:var(--dim);font-style:italic}
+  .evt.action{background:#1d3328;color:var(--green)}
+  .evt.sys{background:#2a2438;color:var(--yellow)}
+  .chatbox{display:flex;gap:8px;margin-top:10px}
+  .chatbox input{flex:1;background:#10131f;border:1px solid var(--line);border-radius:10px;
+                 color:var(--txt);padding:8px 12px;font-size:13px;outline:none}
+  .chatbox input:focus{border-color:var(--blue)}
+  .chatbox button{background:#2a3150;border:none;border-radius:10px;color:var(--txt);
+                  padding:8px 16px;cursor:pointer;font-size:13px}
+  .chatbox button:hover{background:#3a4468}
+  .typing{color:var(--dim);font-style:italic;font-size:12.5px;padding:4px 8px}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:900px){.grid,.two{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<h1>🫀 皮皮 · 生命监控台</h1>
+<div class="sub">
+  <span id="conn"></span><span id="connText">连接中…</span>
+  ｜ 静态页面 + WebSocket 订阅，无需启动任何服务 —— 双击本文件即可使用
+</div>
+
+<div class="grid">
+  <!-- 块1：两只大眼睛 -->
+  <div class="card facebox">
+    <h2>眼睛</h2>
+    <svg id="face" viewBox="0 0 260 160">
+      <g id="eyes">
+        <path id="eyeL" class="eye" d=""/>
+        <path id="eyeR" class="eye" d=""/>
+      </g>
+      <text id="zzz" x="196" y="42" fill="#8b93b8" font-size="20" font-style="italic" opacity="0">z Z</text>
+      <!-- 眼泪（哭泣时显示，循环下落） -->
+      <g id="tears" style="display:none">
+        <ellipse class="tear" cx="68" cy="102" rx="5" ry="8" fill="#6ec6ff"/>
+        <ellipse class="tear t2" cx="82" cy="102" rx="4" ry="6.5" fill="#6ec6ff"/>
+        <ellipse class="tear t3" cx="178" cy="102" rx="5" ry="8" fill="#6ec6ff"/>
+        <ellipse class="tear t4" cx="192" cy="102" rx="4" ry="6.5" fill="#6ec6ff"/>
+      </g>
+    </svg>
+    <span id="stateBadge" class="badge">-</span>
+    <span id="attBadge" class="badge" style="font-size:12px">-</span>
+    <div id="activity">
+      <div class="now">…</div>
+      <div class="intent"></div>
+    </div>
+    <div id="lastThought" style="font-size:12px;color:var(--dim);text-align:center;min-height:18px"></div>
+  </div>
+
+  <div>
+    <!-- 块2：心情与状态（三轴） -->
+    <div class="card">
+      <h2>心情与状态</h2>
+      <div id="stats"></div>
+      <div id="summary">…</div>
+      <div style="font-size:12px;color:var(--dim);margin-top:8px">
+        念头队列 <span id="queue">0</span> · 后端 <span id="backend">-</span>
+      </div>
+      <div id="growthCard" style="display:none;margin-top:12px;border-top:1px solid var(--line);padding-top:10px">
+        <h2 style="margin-bottom:6px">🌱 成长</h2>
+        <div id="growthStage" style="font-size:13px;margin-bottom:4px"></div>
+        <div id="growthGap" style="font-size:12px;color:var(--dim)"></div>
+        <div id="growthMs" style="font-size:12px;margin-top:6px;line-height:1.7"></div>
+        <div id="growthExpr" style="font-size:12px;color:var(--dim);margin-top:4px"></div>
+      </div>
+    </div>
+
+    <!-- 块3：聊天 + 心理记录 -->
+    <div class="two" style="margin-top:14px">
+      <div class="card">
+        <h2>聊天（远程文字，与语音共享记忆）</h2>
+        <div id="chat" class="log" style="max-height:340px"></div>
+        <div class="chatbox">
+          <input id="chatInput" placeholder="打字和皮皮聊两句…（语音对话时会被礼貌拒绝）"
+                 maxlength="200">
+          <button id="chatSend">发送</button>
+        </div>
+      </div>
+      <div class="card log">
+        <h2>心理与行为记录</h2>
+        <div id="life"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const kk = v => v.toFixed(1);
+
+/* ================= WebSocket 订阅 =================
+ * file:// 打开 → 连 ws://127.0.0.1:8848/ws
+ * http(s) 托管 → 连同源
+ * 断线自动重连（1s）。
+ */
+const WS_URL = location.protocol === "file:"
+  ? "ws://127.0.0.1:8848/ws"
+  : `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`;
+
+let ws = null, connected = false;
+let logBuf = [], chatBuf = [];
+
+function setConn(on, text){
+  connected = on;
+  $("conn").className = on ? "on" : "";
+  $("connText").textContent = text;
+}
+function connect(){
+  try{ ws = new WebSocket(WS_URL); }catch(e){ setConn(false, "连接失败，1s 后重试"); return setTimeout(connect, 1000); }
+  ws.onopen = () => setConn(true, "已连接（" + WS_URL + "）");
+  ws.onclose = () => { setConn(false, "连接断开，1s 后重连（窗口端没开？）"); setTimeout(connect, 1000); };
+  ws.onerror = () => ws.close();
+  ws.onmessage = ev => {
+    let m; try{ m = JSON.parse(ev.data); }catch(e){ return; }
+    if (m.type === "backfill"){
+      logBuf = m.log || []; chatBuf = m.chat || [];
+      if (m.snapshot) applySnapshot(m.snapshot);
+      renderLog(); renderChat();
+    } else if (m.type === "snapshot"){ applySnapshot(m.data); }
+    else if (m.type === "event"){ logBuf.push(m.data); if(logBuf.length>300) logBuf.shift(); renderLog(); }
+    else if (m.type === "chat"){ chatBuf.push(m.data); if(chatBuf.length>100) chatBuf.shift(); $("typing")?.remove(); renderChat(); }
+    else if (m.type === "thinking"){ showTyping(); }
+    else if (m.type === "busy"){ $("typing")?.remove(); showNote(m.data && m.data.reason || "忙"); }
+  };
+}
+connect();
+
+/* ================= 三轴状态条 ================= */
+const STATS = [
+  ["mood","心情 (-5~+5)","#ff7eb6",5],
+  ["energy","精力","#ffd479",10],
+  ["social","想陪","#b48cff",10],
+];
+function renderStats(p){
+  const el = $("stats");
+  if (!el.dataset.built){
+    el.innerHTML = STATS.map(([k,label,color]) => `
+      <div class="stat"><div class="lbl"><span>${label}</span><span id="v-${k}">-</span></div>
+      <div class="bar ${k==='mood'?'mood-bar':''}"><i id="b-${k}" style="background:${color}"></i></div></div>`).join("");
+    el.dataset.built = 1;
+  }
+  for (const [k,,color,max] of STATS){
+    $("v-"+k).textContent = kk(p[k]);
+    const b = $("b-"+k);
+    b.style.background = color;
+    b.style.width = Math.abs(p[k])/max*100 + "%";
+  }
+  $("summary").textContent = p.summary || "";
+}
+function applySnapshot(s){
+  renderStats(s.physio); renderFace(s); renderActivity(s.activity);
+  renderGrowth(s.growth);
+  $("queue").textContent = s.queue; $("backend").textContent = s.action_backend;
+  $("lastThought").textContent = s.last_thought ? "最近念头：" + s.last_thought : "";
+}
+function renderGrowth(g){
+  const card = $("growthCard");
+  if (!g || g.enabled === false){ card.style.display = "none"; return; }
+  card.style.display = "";
+  $("growthStage").innerHTML =
+    `🌱 S${g.stage} ${g.stage_name} · 可塑性 ${g.plasticity}（已定型 ${Math.round((1-g.plasticity)*100)}%）`
+    + ` · 相识 ${g.stats.active_days} 天 / ${g.stats.turns} 轮`;
+  const gap = g.gap || {};
+  $("growthGap").textContent = gap.done
+    ? "已到最终阶段（成熟）——你把它养大了"
+    : `下一阶段 S${gap.next_stage}：还差 ${gap.need_days} 天 / ${gap.need_milestones} 个里程碑`;
+  $("growthMs").innerHTML = (g.milestones || []).length
+    ? g.milestones.map(m=>{
+        const t = new Date(m.created_at*1000).toLocaleDateString("zh",{month:"2-digit",day:"2-digit"});
+        return `✨ <b>${m.code}</b> ${m.text} <span style="color:var(--dim)">(${t})</span>`;
+      }).join("<br>")
+    : "✨ 里程碑：暂无（多陪陪它就会点亮）";
+  const ex = Object.entries(g.expressions || {}).sort((a,b)=>b[1]-a[1]).slice(0,4);
+  $("growthExpr").textContent = ex.length
+    ? "偷学你的话：" + ex.map(([k,c])=>`${k}×${c}`).join("、")
+    : "";
+}
+
+/* ================= 两只大眼睛：纯色大圆眼，形状即状态 ================= */
+const CX = [75, 185], CY = 80;
+const circle = (cx, cy, r) =>
+  `M ${cx-r} ${cy} a ${r} ${r} 0 1 0 ${2*r} 0 a ${r} ${r} 0 1 0 ${-2*r} 0 Z`;
+const SHAPES = {
+  // 常规：大圆眼
+  normal: (cx, cy) => circle(cx, cy, 32),
+  // 在听：更圆睁
+  listen: (cx, cy) => circle(cx, cy, 36),
+  // 在说：圆眼 + 轻柔弹跳
+  speak:  (cx, cy) => circle(cx, cy, 32),
+  // 开心：∩ 笑眼
+  happy:  (cx, cy) => `M ${cx-30} ${cy+14} Q ${cx} ${cy-34} ${cx+30} ${cy+14} Q ${cx} ${cy-12} ${cx-30} ${cy+14} Z`,
+  // 委屈：下垂半闭
+  sad:    (cx, cy) => `M ${cx-28} ${cy-6} Q ${cx} ${cy+22} ${cx+28} ${cy-6} Q ${cx+14} ${cy+8} ${cx-28} ${cy-6} Z`,
+  // 困/休息/眨眼：闭眼线
+  closed: (cx, cy) => `M ${cx-28} ${cy} Q ${cx} ${cy+12} ${cx+28} ${cy} Q ${cx} ${cy+5} ${cx-28} ${cy} Z`,
+  // 哭：眯成缝，眼角下垂
+  cry:    (cx, cy) => `M ${cx-28} ${cy-2} Q ${cx} ${cy+16} ${cx+28} ${cy-2} Q ${cx} ${cy+9} ${cx-28} ${cy-2} Z`,
+  // 瞟：偏移圆眼
+  look:   (cx, cy, dx) => circle(cx + dx, cy, 28),
+};
+let blinkUntil = 0, lastFace = null;
+function draw(shape, cy){
+  $("eyeL").setAttribute("d", shape(CX[0], cy));
+  $("eyeR").setAttribute("d", shape(CX[1], cy));
+}
+function renderFace(s){
+  const p = s.physio, st = s.state, att = s.attention;
+  $("stateBadge").textContent = st;
+  $("attBadge").textContent = att;
+  $("eyes").classList.remove("eyes-speaking");
+  $("zzz").style.opacity = 0;
+  lastFace = s;
+  // 心情阈值：对话情绪会回灌 mood，开心/委屈在所有状态下都表达
+  const happy = p.mood > 1.2, sad = p.mood < -1.2;
+  // 哭：对话情绪是委屈/生气，或心情很低 → 眯缝眼 + 掉泪（最高优先级）
+  const crying = p.mood_value === "委屈" || p.mood_value === "生气"
+              || p.mood < -1.8;
+  $("tears").style.display = crying ? "" : "none";
+
+  if (crying){                                     // 哭：眯缝 + 泪
+    draw(SHAPES.cry, CY);
+  } else if (att === "rest" || p.energy < 2.5){    // 困了：闭眼 + Zzz
+    draw(SHAPES.closed, CY);
+    $("zzz").style.opacity = 1;
+  } else if (st === "muttering"){                  // 在说话
+    if (happy){ draw(SHAPES.happy, CY); }
+    else if (sad){ draw(SHAPES.sad, CY); }
+    else {
+      draw(SHAPES.speak, CY);
+      $("eyes").classList.add("eyes-speaking");
+    }
+  } else if (st === "chatting"){                   // 在听
+    if (happy){ draw(SHAPES.happy, CY); }
+    else if (sad){ draw(SHAPES.sad, CY); }
+    else { draw(SHAPES.listen, CY); }
+  } else if (att === "wandering"){                 // 发呆：左右瞟
+    const dx = Math.sin(Date.now()/900) * 14;
+    $("eyeL").setAttribute("d", SHAPES.look(CX[0], CY, dx));
+    $("eyeR").setAttribute("d", SHAPES.look(CX[1], CY, -dx));
+  } else if (happy){                               // 待机开心：笑眼
+    draw(SHAPES.happy, CY);
+  } else if (sad){                                 // 待机委屈
+    draw(SHAPES.sad, CY);
+  } else {                                         // 常规待机：大圆眼 + 眨眼
+    if (Date.now() < blinkUntil){ draw(SHAPES.closed, CY); }
+    else {
+      draw(SHAPES.normal, CY);
+      if (Math.random() < 0.06) blinkUntil = Date.now() + 250;
+    }
+  }
+}
+// 快照 1Hz 才来，眨眼/瞟眼动画用本地时钟持续刷新
+setInterval(() => { if (lastFace) renderFace(lastFace); }, 120);
+
+/* ================= 正在做什么 ================= */
+function renderActivity(a){
+  if (!a) return;
+  $("activity").querySelector(".now").textContent = "🤖 " + (a.now || "…");
+  $("activity").querySelector(".intent").textContent =
+    a.intent ? `心里想着：${a.intent}` : "心里没想什么，很安静";
+}
+
+/* ================= 日志 / 聊天 ================= */
+const KINDS = {thought:"💭", vocal:"🗣️", muted:"🤫", inner:"🧠", discard:"🗑️",
+  cooldown:"⏳", fatigue_mute:"😴", action:"🤖", user_voice:"👂",
+  barge_in:"✋", response_done:"✔️", farewell:"👋", whimper:"🐾"};
+function renderLog(){
+  $("life").innerHTML = logBuf.slice(-40).reverse().map(e=>{
+    const t = new Date(e.t*1000).toLocaleTimeString("zh",{hour12:false});
+    return `<div class="evt ${e.kind==="user_voice"?"user":e.kind==="vocal"?"pipi":
+      e.kind==="inner"?"inner":e.kind==="action"?"action":"sys"}">
+      <span class="t">${t}</span>${KINDS[e.kind]||"·"} ${e.text}</div>`;
+  }).join("") || "<div style='color:var(--dim)'>暂无记录</div>";
+}
+function renderChat(){
+  $("typing")?.remove();
+  const items = chatBuf.slice(-40).reverse().map(m=>
+    `<div class="evt ${m.role==="user"?"user":"pipi"}">
+     <span class="t">${new Date(m.t*1000).toLocaleTimeString("zh",{hour12:false})}</span>
+     ${m.role==="user"?"🙂":"皮皮"} ${m.text}</div>`);
+  $("chat").innerHTML = (items.length ? items.join("") :
+    "<div style='color:var(--dim)'>暂无对话</div>") + "<div id='typing'></div>";
+}
+function showTyping(){
+  $("typing")?.remove();
+  const d = document.createElement("div");
+  d.id = "typing"; d.className = "typing";
+  d.textContent = "皮皮正在想怎么回你……";
+  $("chat").appendChild(d);
+  $("chat").scrollTop = 0;
+}
+function showNote(text){
+  const d = document.createElement("div");
+  d.className = "evt sys";
+  d.textContent = "⚠️ " + text;
+  $("chat").prepend(d);
+}
+
+/* ================= 远程聊天输入 ================= */
+function sendChat(){
+  const inp = $("chatInput");
+  const text = inp.value.trim();
+  if (!text || !connected || !ws || ws.readyState !== 1) return;
+  ws.send(JSON.stringify({type:"chat", text}));
+  inp.value = "";
+}
+$("chatSend").onclick = sendChat;
+$("chatInput").addEventListener("keydown", e => { if (e.key === "Enter") sendChat(); });
+</script>
+</body>
+</html>
