@@ -28,11 +28,6 @@ MODELS: dict[str, tuple[str, str, str]] = {
         "≈ 900 MB",
         "modelscope:iic/SenseVoiceSmall",
     ),
-    "tts": (
-        "CosyVoice-300M —— 情感语音合成，可定制音色",
-        "≈ 1.2 GB",
-        "modelscope:iic/CosyVoice-300M",
-    ),
     "embedding": (
         "bge-small-zh-v1.5 —— 中文语义向量，记忆检索用",
         "≈ 95 MB",

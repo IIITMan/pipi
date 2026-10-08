@@ -48,8 +48,8 @@
 - 被动应答：现有 `handle_turn_stream`（LLM SSE 流式 → 分句 TTS → 边生成边播放）
 - 自发念头：`session.try_speak_spontaneous(text)` —— 文本已定，不走 LLM 应答，
   直接经 `SentenceTTSPlayer` 播报，**复用同一 Barge-in 打断机制**
-- TTS：文档写 CosyVoice；当前 Windows 环境无 GPU 且官方栈不支持，
-  实际生效 edge-tts（降级链 `cosyvoice → edge_tts`，Linux 真机装上官方栈自动切换）
+- TTS：CosyVoice 方案已整体移除（官方栈仅 Linux、需 GPU，Windows/原型环境
+  从未可用）；现降级链为 `ark_tts → edge_tts`，免费兜底 edge-tts
 
 ## 6. 动作层（§7）
 

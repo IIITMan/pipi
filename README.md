@@ -39,7 +39,7 @@ python3 run.py --sim
   ...
 能力健康矩阵：
   asr          sensevoice✗
-  tts          ark_tts✗ → cosyvoice✗ → edge_tts✗ → cloud_openai✗ → mock✓
+  tts          ark_tts✗ → edge_tts✗ → mock✓
   llm          doubao✗ → deepseek✗ → mock✓
   vision       full✓ → detect_only✓ → mock✓
   embedding    bge_small✓ → tfidf✓

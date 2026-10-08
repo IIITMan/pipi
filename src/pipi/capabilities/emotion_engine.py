@@ -242,7 +242,7 @@ class EmotionEngine:
     # ------------------------------------------------------------------
 
     def mood_to_voice_emotion(self, state: EmotionState) -> str:
-        """情绪 → TTS 情感标签（给 CosyVoice 用）。"""
+        """情绪 → TTS 情感标签（豆包 2.0 语音指令用）。"""
         mapping = {
             Mood.CALM: "neutral",
             Mood.HAPPY: "cheerful",

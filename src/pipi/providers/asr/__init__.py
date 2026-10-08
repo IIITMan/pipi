@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from pipi.providers.asr.base import ASRProvider
-from pipi.providers.asr.cloud import DashScopeASR, OpenAIWhisperASR
+from pipi.providers.asr.cloud import DashScopeASR
 from pipi.providers.asr.mock import MockASR
 
 logger = logging.getLogger(__name__)
@@ -44,11 +44,6 @@ def create_asr(name: str, cfg: Any) -> ASRProvider | None:
         p = DashScopeASR(key, sub.get("model", "paraformer-realtime-v2"))
         return p if p.is_available() else None
 
-    if name == "cloud_openai":
-        sub = cfg.get("audio.asr.cloud_openai", {}) if hasattr(cfg, "get") else {}
-        p = OpenAIWhisperASR(sub.get("api_key", ""))
-        return p if p.is_available() else None
-
     if name == "mock":
         return MockASR()
 
@@ -62,5 +57,5 @@ def create_mock_asr() -> MockASR:
 
 __all__ = [
     "ASRProvider", "DashScopeASR",
-    "OpenAIWhisperASR", "MockASR", "create_asr", "create_mock_asr",
+    "MockASR", "create_asr", "create_mock_asr",
 ]

@@ -18,7 +18,7 @@ class TTSRequest:
     emotion: str = "neutral"      # 由 EmotionState 映射而来
     speed: float = 1.0
     voice_id: str | None = None
-    instruction: str | None = None  # CosyVoice 指令控制
+    instruction: str | None = None  # 情感/语气指令（豆包 2.0 语音指令等）
 
 
 @dataclass

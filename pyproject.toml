@@ -18,8 +18,7 @@ dependencies = []
 llm = ["pyyaml>=6.0"]
 # 语音理解：SenseVoice 需要（sounddevice 为麦克风采集）
 speech = ["funasr>=1.1.0", "modelscope>=1.15.0", "torch>=2.0.0", "soundfile", "sounddevice>=0.4.6"]
-# 语音合成：CosyVoice（重）或 edge-tts（轻）
-tts-local = ["cosyvoice"]
+# 语音合成：豆包 TTS 走 HTTP 无额外依赖；备选 edge-tts（轻）
 tts-cloud = ["edge-tts"]
 # 视觉
 vision = ["opencv-python>=4.8.0", "numpy>=1.24.0", "insightface>=0.7.3"]

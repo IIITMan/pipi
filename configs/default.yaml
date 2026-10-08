@@ -135,7 +135,7 @@ audio:
       api_key: ""
       model: "paraformer-realtime-v2"
   # TTS 降级链
-  tts_chain: ["ark_tts", "cosyvoice", "edge_tts", "mock"]
+  tts_chain: ["ark_tts", "edge_tts", "mock"]
   tts:
     # 豆包语音合成大模型 2.0（首选：真流式、情感演绎，按字计费）
     # key 从「火山引擎 > 语音技术控制台 > API Key 管理」获取
@@ -149,13 +149,9 @@ audio:
       emotion_instruction: true                # 2.0 语音指令：按情绪调整语气（不计费）
       cache_enabled: true                      # 固定短语（唤醒应答等）合成一次后播本地缓存
       cache_dir: "data/tts_cache"
-    cosyvoice:
-      model: "iic/CosyVoice-300M"
-      device: "auto"
-      speaker: "中文女"
     edge_tts:
       voice: "zh-CN-XiaoxiaoNeural"
-  # 麦克风语音输入（run.py --mic 启用；缺依赖/无设备自动退回键盘）
+  # 麦克风语音输入（run.py --voice 启用；缺依赖/无设备自动退回键盘）
   mic:
     sample_rate: 16000
     silence_rms: auto           # auto=开机自动校准环境噪声；或填固定数值

@@ -124,7 +124,7 @@
 │   │       └── repositories.py   #   9 个 Repo，embedding 用 struct 打包
 │   ├── providers/                # L3 各能力的多实现
 │   │   ├── asr/                  #   sensevoice | cloud_dashscope | mock
-│   │   ├── tts/                  #   cosyvoice | edge_tts | cloud_openai | mock
+│   │   ├── tts/                  #   ark_tts | edge_tts | mock
 │   │   ├── vision/               #   pipeline + detector/expression/clothing + mock
 │   │   ├── llm/                  #   openai_compat(Qwen/DeepSeek/...) | mock
 │   │   ├── motion/               #   mock | wheeltec(C30D 单板·ROS2 话题)
@@ -416,7 +416,7 @@ FakeClock(start).jump_to_hour(2)    # 跳到凌晨 2 点（测夜间静默）
 ```
 能力健康矩阵：
   asr          sensevoice✗
-  tts          ark_tts✗ → cosyvoice✗ → edge_tts✗ → cloud_openai✗ → mock✓
+  tts          ark_tts✗ → edge_tts✗ → mock✓
   llm          doubao✗ → deepseek✗ → mock✓
   vision       full✓ → detect_only✓ → mock✓
   embedding    bge_small✓ → tfidf✓
