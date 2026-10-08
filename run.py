@@ -4,9 +4,7 @@
 用法：
   python3 run.py                 # 文本对话（自动探测可用的模型/硬件）
   python3 run.py --sim           # 全模拟模式（零依赖，必定能跑）
-  python3 run.py --mic           # 麦克风语音输入
-  python3 run.py --voice         # 免提模式：唤醒词 + VAD 切句 + 语音播报
-  python3 run.py --voice --verbose  # 显示每轮计时分解
+  python3 run.py --voice         # 免提模式：唤醒词 + VAD 切句 + 语音播报（含计时调试）
 
 部署形态（Docker 友好）：
   只跑窗口进程 —— 它内嵌 WebSocket 推送（默认 0.0.0.0:8848），
@@ -30,19 +28,16 @@ def main():
     ap = argparse.ArgumentParser(description="皮皮 · 情感陪伴机器人")
     ap.add_argument("--sim", action="store_true",
                     help="全模拟模式（无模型/无硬件也能跑）")
-    ap.add_argument("--mic", action="store_true",
-                    help="启用麦克风语音输入（需 funasr + sounddevice，缺依赖自动退回键盘）")
     ap.add_argument("--voice", action="store_true",
-                    help="免提模式：唤醒词唤醒 + 语音播报回复（含 --mic 能力，需 TTS 可用）")
+                    help="免提模式：唤醒词唤醒 + 语音播报回复（含计时调试输出，需麦克风与 TTS）")
     ap.add_argument("--user", default="owner", help="用户 ID")
-    ap.add_argument("--verbose", "-v", action="store_true", help="显示调试信息")
     ap.add_argument("--log-level", default="WARNING", help="日志级别")
     ap.add_argument("--proactive", action="store_true",
                     help="启动时触发一次主动搭话")
     ap.add_argument("--config", default="", help="额外配置文件路径")
     args = ap.parse_args()
 
-    setup_logging(args.log_level, short=not args.verbose)
+    setup_logging(args.log_level, short=not args.voice)
 
     cfg = Config.default()
     if args.config:
@@ -59,8 +54,7 @@ def main():
 
     from pipi.interfaces.cli import run_cli
     asyncio.run(run_cli(sim=args.sim, user_id=args.user,
-                        verbose=args.verbose, cfg=cfg,
-                        mic=(args.mic or args.voice) and not args.sim,
+                        verbose=args.voice and not args.sim, cfg=cfg,
                         voice=args.voice and not args.sim))
 
 

@@ -374,6 +374,7 @@ def build_app(cfg: Config | None = None, *, sim: bool = False,
             "llm": cfg.get("capabilities.llm.chain", []),
             "vision": cfg.get("capabilities.vision.chain", []),
             "embedding": cfg.get("capabilities.embedding.chain", []),
+            "voiceprint": cfg.get("capabilities.voiceprint.chain", []),
             "motion": cfg.get("capabilities.motion.chain", []),
         },
         breaker=CircuitBreaker(
@@ -472,6 +473,8 @@ def build_app(cfg: Config | None = None, *, sim: bool = False,
                 auto_enroll=vp_cfg.get("auto_enroll", True),
                 reject_threshold=vp_cfg.get("reject_threshold", 0.35),
             )
+            router.register("voiceprint:sherpa", voiceprint_service,
+                            available=True)
         except Exception as exc:
             logger.warning("声纹识别不可用（%s），所有语音按主人处理", exc)
 

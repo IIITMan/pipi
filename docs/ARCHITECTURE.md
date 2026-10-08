@@ -147,7 +147,7 @@
 │   │   └── rockchip/             #   RK3588 实现（预留）
 │   ├── interfaces/               # L5
 │   │   ├── cli.py                #   命令行
-│   │   ├── web.py                #   FastAPI + SSE（遗留模式）
+│   │   └── web.py                #   FastAPI + SSE（遗留模式，已移除）
 │   │   └── ws_server.py          #   窗口端 WebSocket 推送中枢
 │   └── web/                       #   静态页面（双击即开，订阅 WS）
 │   └── prompts/                  # *.jinja 模板
@@ -561,7 +561,7 @@ python3 run.py --voice    # 窗口进程（WS 默认监听 0.0.0.0:8848）
 **原则：原始数据（音频、画面）绝不持久化，只留结构化、可读、可删的结论。**
 
 CLI 里 `/privacy` 查看开关，`/forget N` 删单条，`/reset` 清空全部。
-Web 观测台每条记忆都有删除按钮和"钉住"按钮。
+（旧 Web 观测台的删除/钉住按钮已随该模块移除，功能由 CLI 命令与 web/monitor.html 承接。）
 
 ---
 

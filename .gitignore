@@ -51,6 +51,12 @@ faces/
 replay_out/
 out.json
 
+# ---------------- 验证产物（脚本本身入库，只忽略输出）----------------
+# pulse 巡检 / 冒烟测试产生的统计与波形，每次运行都会变
+scripts/*_stats.json
+scripts/*_output.csv
+scripts/_tmp_*.py
+
 # ---------------- 密钥与环境 ----------------
 .env
 .env.*

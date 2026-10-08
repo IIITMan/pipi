@@ -2,6 +2,7 @@
 # 皮皮 · 主配置
 # ============================================================
 # 所有可调参数集中在这里。环境变量可覆盖（前缀 PIPI_，如 PIPI_LLM__API_KEY）。
+# ★ 密钥不要写这里：用环境变量，或写到同目录的 local.yaml（已在 .gitignore，优先级最高）。
 # ============================================================
 
 app:
@@ -28,7 +29,10 @@ persona:
 llm:
   provider: "doubao"           # qwen | deepseek | doubao | openai | mock
   base_url: "https://ark.cn-beijing.volces.com/api/v3"
-  api_key: "ark-REDACTED-LLM-KEY"   # 建议改用环境变量 PIPI_LLM__API_KEY
+  # ★ API Key 一律不写入本文件（会被 git 追踪）。
+  #   二选一：① 环境变量 PIPI_LLM__API_KEY  ② configs/local.yaml（已在 .gitignore）
+  #   留空不影响运行 —— app.py 检测到无 key 会自动降级到 MockLLM。
+  api_key: ""
   # 机器人的名字（与人格名区分：人格是"傲娇"，名字是"皮皮"）
   bot_name: "皮皮"
   # ① 主对话模型：闲聊 / 共情 / 有性格的回应
@@ -136,7 +140,7 @@ audio:
     # 豆包语音合成大模型 2.0（首选：真流式、情感演绎，按字计费）
     # key 从「火山引擎 > 语音技术控制台 > API Key 管理」获取
     ark_tts:
-      api_key: "ARK_REDACTED_TTS_KEY"
+      api_key: ""                            # 同 llm：用 PIPI_AUDIO__TTS__ARK_TTS__API_KEY 或 configs/local.yaml
       resource_id: "seed-tts-2.0"
       speaker: "zh_female_peiqi_uranus_bigtts"   # 音色 ID（控制台 > 音色库 可换）
       model: ""                                # 复刻音色时才需指定
@@ -201,6 +205,14 @@ audio:
     min_speech_ms: 200
 
 # ---------------- 生命模块（自发念头/生理状态，v2.1 阶段1）----------------
+# 引擎：pulse（PULSE 心搏，LivingLoop 适配层，默认）| legacy（旧 LifeEngine）
+pulse:
+  backend: "pulse"             # pulse | legacy
+  tick_s: 1.0                  # 心搏 1Hz（呼吸波形/潮汐/天气实时运转）
+  vocal_cooldown_s: 90.0       # 自发开口最小间隔
+  vocal_prob: 0.02             # 每次 5s 决策的开口基础概率（克制，防烦人）
+  diary_memory: false          # 每日日记是否写入记忆库（默认只推送监控/日志）
+
 life:
   enabled: true
   personality:                 # §2.4 人格固定参数

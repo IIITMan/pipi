@@ -148,12 +148,20 @@ class Config:
 
     @classmethod
     def default(cls) -> "Config":
-        """按标准布局加载：configs/default.yaml + configs/degradation.yaml。"""
+        """按标准布局加载：default.yaml → degradation.yaml → local.yaml（可选）。
+
+        local.yaml 用于放本机密钥与个性化覆盖，已在 .gitignore 中，不存在则跳过。
+        三者优先级：local > degradation > default（环境变量优先级最高）。
+        """
         root = PROJECT_ROOT
-        return cls.load(
+        paths = [
             root / "configs" / "default.yaml",
             root / "configs" / "degradation.yaml",
-        )
+        ]
+        local = root / "configs" / "local.yaml"
+        if local.exists():
+            paths.append(local)
+        return cls.load(*paths)
 
 
 # 项目根目录（src/pipi/infra/config.py → 上溯 4 级）

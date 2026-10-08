@@ -11,7 +11,7 @@ try:
         loader=jinja2.FileSystemLoader(Path(__file__).parent),
         autoescape=False, keep_trailing_newline=False,
     )
-except ImportError:            # jinja2 非核心依赖（fastapi 会带上）
+except ImportError:            # jinja2 非核心依赖
     _ENV = None
 
 

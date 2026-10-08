@@ -51,7 +51,7 @@ class CLI:
     """命令行界面。"""
 
     def __init__(self, app: App, user_id: str = "owner", verbose: bool = False,
-                 mic: bool = False, voice: bool = False):
+                 voice: bool = False):
         self.app = app
         self.user_id = user_id
         self.orch = app.orchestrator
@@ -67,7 +67,7 @@ class CLI:
         self._vp: Any | None = None
         self._active_uid: str = user_id
         self._last_uid: str = ""
-        if (mic or voice) and app.asr is not None:
+        if voice and app.asr is not None:
             try:
                 from pipi.providers.asr.mic import MicCapture
 
@@ -83,9 +83,9 @@ class CLI:
                 )
                 if cap.is_available():
                     self.mic = cap
-                    self.voice_mode = voice and app.tts is not None
-                    if voice and app.tts is None:
-                        print("  （语音输出不可用，退回按回车说话模式）")
+                    self.voice_mode = app.tts is not None
+                    if not self.voice_mode:
+                        print("  （语音输出不可用，退回键盘输入）")
                 else:
                     print(f"  （语音输入不可用：{cap._error}，退回键盘输入）")
             except Exception as exc:
@@ -97,8 +97,6 @@ class CLI:
             return
         print(BANNER)
         print(f"  {self.app.health_report()}\n")
-        if self.mic:
-            print("  🎤 语音模式：按回车开始说话（说完自动识别），打字可输入命令\n")
         print("  输入 /help 看命令，直接说话开始聊天\n")
 
         # 首次运行：领养仪式
@@ -127,10 +125,6 @@ class CLI:
 
             text = text.strip()
             if not text:
-                if self.mic:
-                    voice_text = await self._listen()
-                    if voice_text:
-                        await self._say(voice_text)
                 continue
 
             if text.startswith("/"):
@@ -180,44 +174,108 @@ class CLI:
             self._reminders.start()
             print("  ⏰ 提醒/闹铃已就绪（说「提醒我X点…」「设闹钟…」即可）")
 
-        # 生命模块（自发念头/生理状态）——空闲时皮皮会自言自语
+        # 生命模块（PULSE 心搏 / 旧 LifeEngine，可配置回退）
+        #   pulse.backend: "pulse"(默认，LivingLoop) | "legacy"(旧引擎)
         self._life = None
         if self.app.cfg.get("life.enabled", True) and self.app.asr is not None:
-            import random as _random
-
-            from pipi.life import LifeEngine
-
-            persona = self.app.persona
-            bot_name = self.app.cfg.get("persona.bot_name", "皮皮")
-            self._life = LifeEngine(
-                cfg=self.app.cfg,
-                llm=self.app.llm,
-                persona_name=bot_name,
-                persona_hint=f"{bot_name}，{persona.name}人格（{persona.id}），语气傲娇但内心黏人",
-                vision=getattr(self.app, "vision", None),
-                memory_getter=lambda: (
-                    (lambda items: _random.choice(items).content if items else None)(
-                        [m for m in self.app.repos.memory.list_live(self._active_uid)
-                         if m.type.value in ("identity", "preference",
-                                             "event", "commitment", "relation")])
-                ),
-                session=self._session,
-            )
-            # C4：联想链优先引用 story 记忆（成长故事闪回）
-            def _story_getter():
-                items = self.app.repos.memory.list_story(self.user_id, limit=5)
-                return _random.choice(items) if items else None
-
-            self._life.story_getter = _story_getter
+            backend = self.app.cfg.get("pulse.backend", "pulse")
+            if backend == "legacy":
+                self._life = self._build_legacy_life()
+            else:
+                self._life = self._build_pulse_life()
             self._session.life = self._life
             self._life.start()
             if self.verbose:
                 import logging as _logging
-                _logging.getLogger("pipi.life").setLevel(_logging.INFO)
-            print("  🫀 生命模块已启动（空闲时会自发念叨、微动作）")
+                _logging.getLogger("pipi.pulse").setLevel(_logging.INFO)
+            label = "PULSE 心搏（呼吸/潮汐/预感/羁绊/日记成长）" \
+                if backend != "legacy" else "生命模块"
+            print(f"  🫀 {label}已启动（空闲时会自发念叨、微动作）")
 
-        # WebSocket 推送：静态监控页直接订阅，无需启动任何 Web 服务
-        self._chat_lock = asyncio.Lock()
+        # WebSocket 推送：静态监控页直接订阅（无 Web 服务依赖）
+        await self._setup_monitor_push()
+
+        try:
+            await self._session.run()
+        except (KeyboardInterrupt, asyncio.CancelledError):
+            print("\n皮皮 > 那你走吧……哼")
+        finally:
+            if self._reminders is not None:
+                try:
+                    await self._reminders.stop()
+                except Exception:
+                    pass
+            if self._hub is not None:
+                try:
+                    await self._hub.stop()
+                except Exception:
+                    pass
+            if self._life is not None:
+                await self._life.stop()
+
+    def _build_pulse_life(self):
+        """PULSE 心搏运行时（LivingLoop 适配层）。"""
+        from pipi.pulse.runtime import PulseRuntime
+
+        rt = PulseRuntime(
+            cfg=self.app.cfg,
+            session=self._session,
+            vision=getattr(self.app, "vision", None),
+        )
+        rt.bind_cfg(self.app.cfg)
+        # 提醒触发 → 记入当天日记（生命流留痕）
+        if self._reminders is not None:
+            orig = getattr(self._reminders, "sink", None)
+
+            def _sink_with_diary(kind, text, _orig=orig, _rt=rt):
+                if kind == "fired":
+                    try:
+                        _rt.note_event("reminder", text)
+                    except Exception:
+                        pass
+                if _orig is not None:
+                    try:
+                        _orig(kind, text)
+                    except Exception:
+                        pass
+            self._reminders.sink = _sink_with_diary
+        return rt
+
+    def _build_legacy_life(self):
+        """旧 LifeEngine（pulse.backend=legacy 时使用）。"""
+        import random as _random
+
+        from pipi.life import LifeEngine
+
+        persona = self.app.persona
+        bot_name = self.app.cfg.get("persona.bot_name", "皮皮")
+        life = LifeEngine(
+            cfg=self.app.cfg,
+            llm=self.app.llm,
+            persona_name=bot_name,
+            persona_hint=f"{bot_name}，{persona.name}人格（{persona.id}），语气傲娇但内心黏人",
+            vision=getattr(self.app, "vision", None),
+            memory_getter=lambda: (
+                (lambda items: _random.choice(items).content if items else None)(
+                    [m for m in self.app.repos.memory.list_live(self._active_uid)
+                     if m.type.value in ("identity", "preference",
+                                         "event", "commitment", "relation")])
+            ),
+            session=self._session,
+        )
+
+        # C4：联想链优先引用 story 记忆（成长故事闪回）
+        def _story_getter():
+            items = self.app.repos.memory.list_story(self.user_id, limit=5)
+            return _random.choice(items) if items else None
+
+        life.story_getter = _story_getter
+        return life
+
+    # ------------------------------------------------------------------
+    # WebSocket 推送：静态监控页直接订阅，无需启动任何 Web 服务
+    # ------------------------------------------------------------------
+    async def _setup_monitor_push(self) -> None:
         ws_port = self.app.cfg.get("life.ws_port", 8848)
         ws_host = self.app.cfg.get("life.ws_host", "127.0.0.1")
         try:
@@ -250,24 +308,6 @@ class CLI:
                   f"（双击打开 web/monitor.html 即可查看）")
         except Exception as exc:
             print(f"  （WebSocket 推送不可用：{exc}）")
-
-        try:
-            await self._session.run()
-        except (KeyboardInterrupt, asyncio.CancelledError):
-            print("\n皮皮 > 那你走吧……哼")
-        finally:
-            if self._reminders is not None:
-                try:
-                    await self._reminders.stop()
-                except Exception:
-                    pass
-            if self._hub is not None:
-                try:
-                    await self._hub.stop()
-                except Exception:
-                    pass
-            if self._life is not None:
-                await self._life.stop()
 
     def _on_barge_in(self) -> None:
         """打断：立即停止 TTS 播放并清空缓冲。"""
@@ -387,41 +427,6 @@ class CLI:
                 if result.emotion_state is not None:
                     self._life.physio.observe_dialogue_mood(
                         result.emotion_state.mood.value)
-
-    async def _listen(self) -> str:
-        import time as _time
-
-        """录一段语音并识别，返回文本（空串表示没识别到）。"""
-        loop = asyncio.get_running_loop()
-        print("  🎤 请说话…（说完停顿自动结束）", flush=True)
-        try:
-            audio = await loop.run_in_executor(None, self.mic.record_until_silence)
-        except Exception as exc:
-            print(f"  ✗ 录音失败：{exc}")
-            return ""
-        if audio.size == 0:
-            print("  ✗ 没录到声音")
-            return ""
-        if self.mic.level_of(audio) < self.mic.threshold:
-            print(f"  ✗ 音量太小（RMS={self.mic.level_of(audio):.0f} < "
-                  f"阈值 {self.mic.threshold:.0f}），可调大 audio.mic.gain")
-            return ""
-        try:
-            _t0 = _time.perf_counter()
-            t = await self.app.asr.transcribe(audio.tobytes(), self.mic.sample_rate)
-            asr_ms = (_time.perf_counter() - _t0) * 1000
-        except Exception as exc:
-            print(f"  ✗ 识别失败：{exc}")
-            return ""
-        if not t.text:
-            print("  ✗ 没听清，再试一次？")
-            return ""
-        emo = t.emotion if getattr(t, "emotion", None) else "NEUTRAL"
-        print(f"  🎤 （{emo}）{t.text}")
-        if self.verbose:
-            print(f"  ⏱ 语音 {len(audio) / self.mic.sample_rate:.1f}s"
-                  f" → ASR {asr_ms:.0f}ms")
-        return t.text
 
     async def _say(self, text: str) -> None:
         self.app.proactive_engine.note_user_response(self.app.clock.now())
@@ -634,11 +639,11 @@ class CLI:
 
 async def run_cli(sim: bool = False, user_id: str = "owner",
                   verbose: bool = False, cfg: Config | None = None,
-                  mic: bool = False, voice: bool = False) -> None:
+                  voice: bool = False) -> None:
     """启动 CLI。"""
     app = build_app(cfg, sim=sim)
     try:
-        cli = CLI(app, user_id=user_id, verbose=verbose, mic=mic, voice=voice)
+        cli = CLI(app, user_id=user_id, verbose=verbose, voice=voice)
         await cli.run()
     finally:
         app.close()

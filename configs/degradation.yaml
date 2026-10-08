@@ -8,10 +8,11 @@
 
 capabilities:
 
-  # 语音识别：本地 → 云 → 键盘输入
+  # 语音识别：唯一方案 sherpa-onnx SenseVoice int8（无降级；
+  # 模型缺失 → 麦克风输入不可用，文本模式不受影响）
   asr:
-    chain: ["sensevoice", "cloud_dashscope", "mock"]
-    description: "SenseVoice 本地推理不可用时退到云 API，最后退到键盘输入"
+    chain: ["sensevoice"]
+    description: "全 sherpa 音频链（KWS/VAD/ASR），无降级；缺失即报错"
 
   # 语音合成：豆包语音合成 2.0（真流式+情感）→ 本地 → 免费的 edge-tts → 只打印
   tts:
@@ -44,6 +45,10 @@ capabilities:
   # 运动控制：轮趣 C30D 实机（ROS2 话题）→ 纯日志
   motion:
     chain: ["wheeltec", "mock"]
+
+  # 声纹识别：sherpa-onnx ERes2Net（主人/陌生人分轨）
+  voiceprint:
+    chain: ["sherpa"]
 
 # 运行期熔断参数
 circuit_breaker:

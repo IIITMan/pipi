@@ -18,7 +18,7 @@
   认主（InsightFace）、表情（hsemotion/FER）、衣着颜色（ColorClothingAnalyzer），
   低频采样（默认 1.5fps），无摄像头自动降级 `MockVision`。
 - **但 vision 只在对话时被 orchestrator 拍一帧**（`handle_turn` 传 `vision=...`），
-  以及 proactive 触发时拍一次（`web.py`）。
+  以及 proactive 触发时拍一次（旧 `web.py`，该模块现已移除）。
 - **`LifeEngine` 完全没有引用 vision** —— 皮皮待机时是"瞎的"，
   摄像头存在与否、主人是否在场、有没有陌生人，生命模块一概不知。
 
@@ -173,7 +173,7 @@ life:
 pipeline 单实例可能被多处调用。裁定：**感知循环是 capture() 的唯一消费者**，
 到场/离场由循环内部对比前后帧判定（不依赖 pipeline 的沿标志）；
 `loop.latest` 暴露最近一帧观测，对话注入视觉从这读，不再各自拍帧。
-遗留 `web.py` 是独立进程（相机设备无法双开），无竞争，不改。
+遗留 `web.py` 是独立进程（相机设备无法双开），无竞争，不改。（注：该模块后续已移除）
 
 **② 与 ProactiveEngine 打招呼撞车**：`owner_arrived` 事件在 life 侧
 **只记 concern + 调生理，不产生发声念头**——「你回来啦」的发声权归 proactive；

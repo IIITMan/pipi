@@ -75,8 +75,18 @@ export PIPI_LLM__API_KEY=sk-xxxxxxxx
 python3 run.py --voice
 ```
 
-也可以改 `configs/default.yaml` 里的 `llm.api_key`。
-支持 Qwen / DeepSeek / OpenAI / Moonshot，在 `llm.provider` 里切换。
+不想每次 `export`？两个更省事的入口（**都进不了 git**）：
+
+```bash
+cp configs/default.yaml configs/local.yaml   # 优先级高于 default.yaml；已在 .gitignore
+vim configs/local.yaml                       # 在里面填 llm.api_key 等
+# 或：cp .env.example .env
+```
+
+> 注意：**不要把密钥写进 `configs/default.yaml`** —— 它会被版本追踪。
+> 该文件里的 `api_key` 保持为空，程序会自动降级到 MockLLM。
+
+支持 Qwen / DeepSeek / 豆包 / OpenAI / Moonshot，在 `llm.provider` 里切换。
 
 ---
 
@@ -154,9 +164,7 @@ python3 scripts/audit_core.py
 ```bash
 python3 run.py                 # 文本对话（自动探测可用的模型/硬件）
 python3 run.py --sim           # 全模拟（零依赖，必定能跑）
-python3 run.py --mic           # 麦克风语音输入
-python3 run.py --voice         # 免提模式：唤醒词 + 连续对话 + 语音播报
-python3 run.py --verbose       # 显示延迟与调试信息
+python3 run.py --voice         # 免提模式：唤醒词 + 连续对话 + 语音播报（含计时调试）
 python3 run.py --user alice    # 指定用户（多用户隔离）
 python3 run.py --proactive     # 启动时先让皮皮主动说一句
 ```
@@ -175,7 +183,7 @@ src/pipi/
 ├── agents/           # 三 Agent 分工 + 能力路由器
 ├── orchestration/    # 主编排 + 主动引擎 + 生命模块调度
 ├── life/             # 生命引擎：内在状态 / 自发念头 / 行为调度
-├── interfaces/       # CLI（窗口端，内嵌 WS 推送）+ 遗留 Web 观测台
+├── interfaces/       # CLI（窗口端，内嵌 WS 推送）
 └── prompts/          # 人格与任务模板
 web/monitor.html      # 纯静态监控页（WS 订阅，双击即开）
 ```
@@ -190,14 +198,14 @@ web/monitor.html      # 纯静态监控页（WS 订阅，双击即开）
 按需要加：
 
 ```bash
-# 遗留记忆观测台（可选；监控用 web/monitor.html 即可）
-pip install -e ".[web]"
-
 # 接真模型需要 YAML 解析
 pip install -e ".[llm]"
 
 # 语音链路（KWS/VAD/ASR 全 sherpa-onnx；模型约 280MB 放 data/models/）
 pip install sherpa-onnx sounddevice soundfile
+
+# 监控推送（--voice 模式内嵌 WS 服务，web/monitor.html 订阅用）
+pip install -e ".[monitor]"
 
 # 语音合成（豆包流式走 HTTP，无额外依赖；备选 edge-tts）
 pip install -e ".[tts-cloud]"

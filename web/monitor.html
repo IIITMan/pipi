@@ -102,6 +102,18 @@
       <div style="font-size:12px;color:var(--dim);margin-top:8px">
         念头队列 <span id="queue">0</span> · 后端 <span id="backend">-</span>
       </div>
+      <div id="pulseCard" style="display:none;margin-top:12px;border-top:1px solid var(--line);padding-top:10px">
+        <h2 style="margin-bottom:6px">🫀 心搏（PULSE）</h2>
+        <div style="font-size:12px;line-height:1.9">
+          <div>呼吸 <span id="pBreath">-</span> · 天气 <span id="pWeather">-</span>
+              <span id="pOwner" style="color:var(--dim)"></span></div>
+          <div>对话心情 <span id="pChatMood" style="color:var(--dim)">—</span>
+              <span id="pPhase" style="color:var(--dim)"></span></div>
+          <div>信任 <span id="pTrust">-</span> · 自我深度 <span id="pDepth">-</span>
+              · 挣扎 <span id="pStruggle">-</span></div>
+          <div id="pSeed" style="margin-top:4px;font-size:11px;color:var(--dim)"></div>
+        </div>
+      </div>
       <div id="growthCard" style="display:none;margin-top:12px;border-top:1px solid var(--line);padding-top:10px">
         <h2 style="margin-bottom:6px">🌱 成长</h2>
         <div id="growthStage" style="font-size:13px;margin-bottom:4px"></div>
@@ -200,9 +212,31 @@ function renderStats(p){
 }
 function applySnapshot(s){
   renderStats(s.physio); renderFace(s); renderActivity(s.activity);
-  renderGrowth(s.growth); renderReminders(s.reminders);
+  renderGrowth(s.growth); renderReminders(s.reminders); renderPulse(s.pulse);
   $("queue").textContent = s.queue; $("backend").textContent = s.action_backend;
   $("lastThought").textContent = s.last_thought ? "最近念头：" + s.last_thought : "";
+}
+const SEED_AXES = [["boldness","胆识"],["curiosity","好奇"],["clinginess","依恋"],
+                   ["sensitivity","敏感"],["reactivity","应激"]];
+function renderPulse(p){
+  const card = $("pulseCard");
+  if (!p){ card.style.display = "none"; return; }
+  card.style.display = "";
+  $("pBreath").textContent = `${p.breath.rate.toFixed(0)} bpm · 深度 ${p.breath.depth.toFixed(2)}`;
+  $("pWeather").textContent = `${p.weather.label}${p.sleeping ? "（睡着了）" : ""}`;
+  $("pOwner").textContent = p.owner_present ? "· 主人在" : "· 主人不在";
+  const moodSign = {"开心":1,"得意":1,"调皮":1,"关心":1,"平静":0,"困倦":-1,
+    "傲娇":0,"吃醋":-1,"委屈":-1,"生气":-1}[p.last_chat_mood];
+  $("pChatMood").textContent = p.last_chat_mood
+    ? `${p.last_chat_mood}${moodSign > 0 ? " 😊" : moodSign < 0 ? " 😞" : ""}` : "—";
+  $("pPhase").textContent = p.sess_phase === "LISTEN" ? "· 正在听"
+    : p.sess_phase === "RESPOND" ? "· 正在说" : "";
+  $("pTrust").textContent = p.trust.toFixed(1);
+  $("pDepth").textContent = p.self_depth;
+  $("pStruggle").textContent = p.struggle.toFixed(2);
+  $("pSeed").innerHTML = SEED_AXES.map(([k, zh]) =>
+    `<span style="display:inline-block;min-width:118px;margin-right:6px">${zh} ${(p.seed[k]||0).toFixed(2)}</span>`
+  ).join("");
 }
 function renderGrowth(g){
   const card = $("growthCard");

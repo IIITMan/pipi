@@ -27,8 +27,8 @@ vision-lite = ["opencv-python>=4.8.0", "numpy>=1.24.0"]
 expression = ["hsemotion-onnx"]
 # 记忆向量检索
 vector = ["sentence-transformers>=2.2.0", "numpy>=1.24.0"]
-# Web 界面
-web = ["fastapi>=0.110.0", "uvicorn>=0.27.0"]
+# 监控推送（--voice 模式内嵌 WS 服务，web/monitor.html 订阅用）
+monitor = ["websockets>=12.0"]
 # 硬件（C30D 经 ROS2 话题通信，Python 侧只需 rclpy —— 随 ROS2 发行版安装）
 hardware = []
 # 专用关键词唤醒（sherpa-onnx KWS，待机零负载）
