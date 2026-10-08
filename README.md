@@ -38,11 +38,12 @@ python3 run.py --sim
    ╰──────────────────────────────────╯
   ...
 能力健康矩阵：
-  asr          sensevoice✗ → cloud_dashscope✗ → mock✓
-  tts          cosyvoice✗ → edge_tts✗ → cloud_openai✗ → mock✓
-  llm          qwen✗ → deepseek✗ → mock✓
+  asr          sensevoice✗
+  tts          ark_tts✗ → cosyvoice✗ → edge_tts✗ → cloud_openai✗ → mock✓
+  llm          doubao✗ → deepseek✗ → mock✓
   vision       full✓ → detect_only✓ → mock✓
   embedding    bge_small✓ → tfidf✓
+  voiceprint   sherpa✗
   motion       wheeltec✗ → mock✓
 
 皮皮 > 诶，你是谁啊？

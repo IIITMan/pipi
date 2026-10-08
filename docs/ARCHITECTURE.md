@@ -415,11 +415,12 @@ FakeClock(start).jump_to_hour(2)    # 跳到凌晨 2 点（测夜间静默）
 
 ```
 能力健康矩阵：
-  asr          sensevoice✗ → cloud_dashscope✗ → mock✓
-  tts          cosyvoice✗ → edge_tts✗ → cloud_openai✗ → mock✓
-  llm          qwen✗ → deepseek✗ → mock✓
+  asr          sensevoice✗
+  tts          ark_tts✗ → cosyvoice✗ → edge_tts✗ → cloud_openai✗ → mock✓
+  llm          doubao✗ → deepseek✗ → mock✓
   vision       full✓ → detect_only✓ → mock✓
   embedding    bge_small✓ → tfidf✓
+  voiceprint   sherpa✗
   motion       wheeltec✗ → mock✓
 ```
 
