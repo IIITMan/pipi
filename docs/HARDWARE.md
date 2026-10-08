@@ -24,7 +24,7 @@
 
 > 📐 **底盘怎么画** → 见独立文档 **[`CHASSIS.md`](CHASSIS.md)**：十字布局推导、L/R 麦轮布置图、
 > **电池选型对照表（18650 / 21700 / 26650）**、重心分层、装配 12 步。
-> 参数化模型 **[`hardware/chassis.scad`](../hardware/chassis.scad)**，导出件在 `hardware/exports/`。
+> 参数化模型 **`hardware/chassis.scad`**（已从仓库移除，git 历史可取回；导出命令见 CHASSIS.md）。
 
 ---
 

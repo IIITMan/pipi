@@ -535,7 +535,7 @@ python3 run.py --voice    # 窗口进程（WS 默认监听 0.0.0.0:8848）
 | 电池 | **18650 3S2P 7.0Ah**（¥167，活跃续航 2.5h，兼容 21700/26650） |
 | 侧翻裕度 | 21.4× |
 | **自动回充** | **AprilTag(远) + 双红外(近)，三段解耦 `vx`/`vy`/`wz`，桩 ¥80~150** |
-| 参数化模型 | [`hardware/chassis.scad`](../hardware/chassis.scad)、[`hardware/dock.scad`](../hardware/dock.scad) |
+| 参数化模型 | `hardware/*.scad`（已从仓库移除，git 历史可取回） |
 
 > **为什么十字而不是方形**：皮皮是圆柱壳，四轮 90° 均布天然贴合、旋转时车体扫过即自身轮廓，
 > 不会像方形底盘那样「甩角」蹭家具。代价是绕 Z 力矩臂小 29.3%，靠 footprint 从 170mm 放大到 240mm 补回。

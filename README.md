@@ -312,10 +312,9 @@ ROS2+micro-ROS 部署步骤、C30D 固件要点、引脚映射表与避坑清单
 
 **移动版底盘的完整设计见 [`docs/CHASSIS.md`](docs/CHASSIS.md)** ——
 真·十字形布局推导、麦轮 L/R 布置、**电池选型对照表（18650 / 21700 / 26650）**、
-重心分层与稳定性核算、**自动回充与充电桩（含无线充电可行性对比）**；
-参数化模型 [`hardware/chassis.scad`](hardware/chassis.scad) 与
-[`hardware/dock.scad`](hardware/dock.scad)，
-可直接导出的底板 `.stl` / `.dxf` 与充电桩示意图在 `hardware/exports/`。
+重心分层与稳定性核算、**自动回充与充电桩（含无线充电可行性对比）**。
+（OpenSCAD 参数化模型与 `.stl` / `.dxf` 导出件已从仓库移除，需要时从 git 历史取回
+`git checkout 4d21d2e -- hardware/`，或按 CHASSIS.md §导出命令自行生成。）
 
 **对话模型选型见 [`docs/LLM_SELECTION.md`](docs/LLM_SELECTION.md)** ——
 从 0.5B 到旗舰的五个档位、**各模型闲聊成本实算**、三档模型分工配置、
