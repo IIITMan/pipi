@@ -207,16 +207,20 @@ def _register_fallbacks(cfg: Config, sim: bool, router: CapabilityRouter) -> Non
             router.register("vision:full", MockVision(), available=True)
             router.register("vision:detect_only", MockVision(), available=True)
         else:
-            # 实机：先尝试建完整 pipeline；建不起来就退到纯 mock
+            # 实机：先尝试建完整 pipeline；建不起来（无 cv2/无摄像头）就退到纯 mock
             try:
                 from pipi.providers.vision import create_vision
                 full = create_vision(cfg)
             except Exception:
                 full = None
-            if full is not None:
-                router.register("vision:full", full,
-                                available=bool(getattr(full, "is_available", lambda: True)()))
-            router.register("vision:detect_only", MockVision(), available=True)
+            # create_vision 缺依赖/无摄像头时会返回 MockVision ——
+            # 矩阵必须如实显示 ×，不能让 mock 冒充 full 档
+            full_is_real = (full is not None
+                            and type(full).__name__ != "MockVision")
+            router.register("vision:full", full or MockVision(),
+                            available=full_is_real)
+            router.register("vision:detect_only", full or MockVision(),
+                            available=full_is_real)
     except Exception as exc:
         logger.debug("视觉降级档位注册失败：%s", exc)
 
