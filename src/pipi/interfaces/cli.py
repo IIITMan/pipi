@@ -194,9 +194,12 @@ class CLI:
                 llm=self.app.llm,
                 persona_name=bot_name,
                 persona_hint=f"{bot_name}，{persona.name}人格（{persona.id}），语气傲娇但内心黏人",
+                vision=getattr(self.app, "vision", None),
                 memory_getter=lambda: (
                     (lambda items: _random.choice(items).content if items else None)(
-                        self.app.repos.memory.list_live(self.user_id))
+                        [m for m in self.app.repos.memory.list_live(self._active_uid)
+                         if m.type.value in ("identity", "preference",
+                                             "event", "commitment", "relation")])
                 ),
                 session=self._session,
             )
@@ -288,6 +291,11 @@ class CLI:
         if self._vp is None:
             return None
         uid = self._vp.identify(audio)
+        if not self._vp.enrolled and getattr(self._vp, "_enroll_buf", None):
+            print(f"  🔑 声纹登记中 {len(self._vp._enroll_buf)}/"
+                  f"{self._vp.enroll_target}（再说几句完成建档）", flush=True)
+        if self.verbose and getattr(self._vp, "last_sim", None) is not None:
+            print(f"  🎙 声纹相似度 {self._vp.last_sim:.2f}", flush=True)
         if uid and uid != self._last_uid:
             if uid == "owner":
                 print("  🔑 已登记声纹：你就是主人" if not self._last_uid

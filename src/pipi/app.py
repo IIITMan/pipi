@@ -470,6 +470,7 @@ def build_app(cfg: Config | None = None, *, sim: bool = False,
                 kv_repo=repos.kv,
                 threshold=vp_cfg.get("threshold", 0.5),
                 auto_enroll=vp_cfg.get("auto_enroll", True),
+                reject_threshold=vp_cfg.get("reject_threshold", 0.35),
             )
         except Exception as exc:
             logger.warning("声纹识别不可用（%s），所有语音按主人处理", exc)

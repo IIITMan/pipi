@@ -94,6 +94,12 @@ class Physiology:
         self.mood = _clamp(self.mood + 0.3, -5.0, 5.0)
         self.energy = _clamp(self.energy - 0.2, 0.0, 10.0)
 
+    def on_owner_present(self) -> None:
+        """视觉：主人回来了（PERCEPTION_PLAN §8，不复用 on_user_voice，
+        安静计时器与对话语义解耦）。"""
+        self.mood = _clamp(self.mood + 0.3, -5.0, 5.0)
+        self.social = _clamp(self.social - 3.0, 0.0, 10.0)
+
     def seconds_since_user_voice(self) -> float:
         """距上次听到主人说话的秒数（公开方法，供引擎查询）。"""
         return time.monotonic() - self._last_user_voice

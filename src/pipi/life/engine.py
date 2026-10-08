@@ -45,6 +45,15 @@ class InnerEvent:
     cause: str = ""            # 触发来源：social/patrol/memory/chain/...
 
 
+@dataclass
+class Concern:
+    """关心列表条目（PERCEPTION_PLAN §2.4）：感知事件沉淀的"在意"。"""
+
+    text: str
+    source: str                # owner_arrived/owner_gone/stranger/owner_expression
+    t: float
+
+
 class LifeEngine:
     """生命感内核：生理状态、注意力、念头生成与行为调度。"""
 
@@ -56,6 +65,7 @@ class LifeEngine:
         persona_hint: str,
         memory_getter: Callable[[], str | None],
         session: Any,
+        vision: Any | None = None,
     ):
         life_cfg = cfg.get("life", {}) or {}
         self.cfg = life_cfg
@@ -65,6 +75,8 @@ class LifeEngine:
         self.memory_getter = memory_getter
         self.story_getter: Callable[[], str | None] | None = None  # C4：story 记忆优先
         self.session = session
+        # 视觉感知（PERCEPTION_PLAN）：None=无摄像头，感知循环不启动
+        self.vision = vision
 
         pers_cfg = life_cfg.get("personality", {}) or {}
         self.personality = Personality(
@@ -117,9 +129,14 @@ class LifeEngine:
         self._chain_vocal_prob = float(chain_cfg.get("vocal_prob", 0.3))
         self._chain_timeout = float(chain_cfg.get("timeout_s", 12.0))
         # 监控事件日志（心理记录）：kind ∈ thought/vocal/discard/cooldown/
-        # fatigue_mute/action/user_voice/barge_in/response_done/farewell/whimper
+        # fatigue_mute/action/user_voice/barge_in/response_done/farewell/whimper/
+        # vision/owner_gone/stranger/owner_expression
         self.log: deque = deque(maxlen=300)
         self._last_whimper = 0.0
+        # 关心列表（PERCEPTION_PLAN §2.4，L2 动机层雏形）：感知事件沉淀
+        self.concerns: deque = deque(maxlen=8)
+        # 感知循环（vision 非 None 且 life.perception.enabled 时随 start 启动）
+        self._perception: Any | None = None
         # 监控上报：事件/快照/聊天经 sink 推给监控端（窗口端注入 WS 推送）
         self._sink: Callable[[dict], None] | None = None
         self._outbox: deque = deque(maxlen=100)
@@ -206,14 +223,54 @@ class LifeEngine:
             asyncio.create_task(self._schedule_loop(), name="life-scheduler"),
             asyncio.create_task(self._monitor_flush_loop(), name="life-monitor"),
         ]
+        # 感知循环（PERCEPTION_PLAN）：vision 注入且启用时启动
+        if self.vision is not None and \
+                (self.cfg.get("perception", {}) or {}).get("enabled", True):
+            from pipi.life.perception import MonotonicClock, PerceptionLoop
+
+            self._perception = PerceptionLoop(
+                self.vision, MonotonicClock(),
+                self.cfg.get("perception", {}) or {},
+                on_event=self.observe_vision)
+            self._perception.start()
+            logger.info("感知循环已启动（视觉接入生命模块）")
         logger.info("生命模块启动（action=%s）", self.action.name)
 
     async def stop(self) -> None:
         self._running = False
+        if self._perception is not None:
+            await self._perception.stop()
+            self._perception = None
         for t in self._tasks:
             t.cancel()
         await asyncio.gather(*self._tasks, return_exceptions=True)
         self._tasks.clear()
+
+    # ------------------------------------------------------------------
+    # 视觉感知注入（PERCEPTION_PLAN §2.3）
+    # ------------------------------------------------------------------
+
+    def observe_vision(self, event) -> None:
+        """感知事件分派：生理微调 + 关心列表（不直接驱动发声）。"""
+        from pipi.life.perception import PerceptionEvent
+
+        self._log(event.kind, event.text)
+        concern = {"owner_arrived": "他回来了",
+                   "owner_gone": "又剩我一个了",
+                   "stranger": "有陌生人",
+                   "owner_expression": "主人好像不太开心"}.get(event.kind)
+        if concern:
+            self.concerns.append(
+                Concern(text=concern, source=event.kind, t=event.t))
+
+        if event.kind == "owner_arrived":
+            self.physio.on_owner_present()
+        elif event.kind == "owner_expression":
+            # 主人低落：心情微降 + 更想陪（不适用对话情绪回灌）
+            self.physio.mood = max(-5.0, self.physio.mood - 0.3)
+            self.physio.social = min(10.0, self.physio.social + 0.5)
+        elif event.kind == "stranger":
+            self.scheduler.startle()   # 受惊反应（§3 distracted）
 
     # ------------------------------------------------------------------
     # 会话事件注入（由 InteractionSession 调用）
@@ -378,8 +435,10 @@ class LifeEngine:
         try:
             from pipi.prompts import render
 
-            # 上文：最近 2 条内心事件；记忆：优先 story（C4），回落普通记忆
+            # 上文：最近 2 条内心事件；感知关心（最近 1 条）让联想"看得见"
             recent = [e.text for e in list(self.inner_stream)[-2:]]
+            if self.concerns:
+                recent.append(f"（你在意：{self.concerns[-1].text}）")
             memory = None
             if self.story_getter is not None:
                 try:

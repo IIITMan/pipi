@@ -162,7 +162,8 @@ audio:
     silence_tail: 1.2           # 连续静音多久判定"说完"（秒）
     max_seconds: 15             # 单段录音兜底上限
     # 免提模式（run.py --voice）：唤醒词 + 自动休眠
-    wake_words: ["皮皮", "pipi"]
+    # "pp"/"p p"：SenseVoice 常把「皮皮」转写成字母
+    wake_words: ["皮皮", "pipi", "pp", "p p", "小皮"]
     sleep_after_s: 30           # 唤醒后安静多久回到待唤醒（秒）
     # 四阶段交互状态机
     vad:
@@ -184,7 +185,8 @@ audio:
       # 首次说话自动登记主人声纹；之后相似度 ≥ threshold → 主人，否则陌生人
       enabled: true
       model: "data/models/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx"
-      threshold: 0.5            # 相似度阈值（误把陌生人当主人就调高）
+      threshold: 0.5            # 相似度 ≥ 此值 → 主人
+      reject_threshold: 0.35    # 相似度 < 此值 → 陌生人；两者之间保持原判（灰区）
       auto_enroll: true         # 无主人声纹时，第一段语音自动登记
     session:
       timeout_s: 10             # 阶段4：会话内安静多久回待机（8~12）
@@ -215,6 +217,13 @@ life:
   wandering_cooldown_s: 90.0   # wandering 发呆模式冷却
   thought_ttl_s: 5.0           # §9.2 念头最大存活
   social_vocal_threshold: 7.5  # 想找人说话的触发阈值（0~10，越高越稀有；本体行为不受限）
+  # 感知接入（PERCEPTION_PLAN）：摄像头 → 离散事件 → 生理/关心列表
+  # 总开关仍是 vision.enabled；无摄像头时感知循环不启动
+  perception:
+    enabled: true
+    fps: 1.0                 # 常驻采样帧率（比对话时的 1.5fps 省）
+    debounce_s: 30.0         # 同一事件去重窗口
+    stranger_cooldown_s: 300 # 陌生人受惊冷却（防频繁吓到）
   energy_min_vocal: 2.5        # §9.3 精力下限：低于则念头不发声（犯困）
   sleep_energy: 2.5            # §2.2 精力低于则注意力切 rest（犯困闭眼）
   wandering_enter_s: 45.0      # 安静多久进入 wandering 发呆

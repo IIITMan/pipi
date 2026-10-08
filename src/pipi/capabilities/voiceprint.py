@@ -38,7 +38,8 @@ class VoicePrintManager:
     name = "sherpa_voiceprint"
 
     def __init__(self, model_path: str, kv_repo: Any = None,
-                 threshold: float = 0.5, auto_enroll: bool = True):
+                 threshold: float = 0.5, auto_enroll: bool = True,
+                 reject_threshold: float = 0.35):
         import sherpa_onnx
 
         p = Path(model_path)
@@ -52,12 +53,16 @@ class VoicePrintManager:
             model=str(p), num_threads=2)
         self._ext = sherpa_onnx.SpeakerEmbeddingExtractor(config)
         self.kv = kv_repo
-        self.threshold = float(threshold)
+        self.threshold = float(threshold)          # ≥ 此值 → 主人
+        self.reject_threshold = float(reject_threshold)  # < 此值 → 陌生人
         self.auto_enroll = bool(auto_enroll)
+        self.last_sim: float | None = None         # 最近一次相似度（校准用）
         self._owner_emb: list[float] | None = None
+        self._enroll_buf: list[list[float]] = []   # 建档样本（3 段取平均）
+        self.enroll_target = 3
         self._load_owner()
-        logger.info("声纹识别就绪（%s，已建档=%s，阈值=%.2f）",
-                    p.name, self.enrolled, self.threshold)
+        logger.info("声纹识别就绪（%s，已建档=%s，主人≥%.2f 陌生人<%.2f）",
+                    p.name, self.enrolled, self.threshold, self.reject_threshold)
 
     # ------------------------------------------------------------------
 
@@ -79,9 +84,12 @@ class VoicePrintManager:
                 self._owner_emb = None
 
     def _embed(self, audio: np.ndarray) -> list[float] | None:
-        """int16 音频 → 说话人 embedding（短于 0.6s 或全静音返回 None）。"""
+        """int16 音频 → 说话人 embedding（短于 1.2s 或全静音返回 None）。
+
+        短句的 embedding 方差大（同一个人也会漂），不足 1.2s 不做判断。
+        """
         samples = np.asarray(audio, dtype=np.int16).astype(np.float32) / 32768.0
-        if len(samples) < 16000 * 0.6:
+        if len(samples) < 16000 * 1.2:
             return None
         if float(np.sqrt(np.mean(samples ** 2))) < 0.005:
             return None
@@ -91,19 +99,30 @@ class VoicePrintManager:
         return emb if emb else None
 
     def enroll_owner(self, audio: np.ndarray) -> bool:
-        """登记主人声纹（kv_store 持久化，跨重启有效）。"""
+        """登记主人声纹：累积 3 段取平均（单段失真被稀释），完成才落库。"""
         emb = self._embed(audio)
         if emb is None:
             return False
-        self._owner_emb = emb
+        self._enroll_buf.append(emb)
+        if len(self._enroll_buf) < self.enroll_target:
+            logger.info("声纹登记中 %d/%d", len(self._enroll_buf),
+                        self.enroll_target)
+            return False
+        mean = np.mean(np.asarray(self._enroll_buf, dtype=np.float32), axis=0)
+        norm = float(np.linalg.norm(mean))
+        if norm > 0:
+            mean = mean / norm
+        self._owner_emb = mean.tolist()
+        self._enroll_buf = []
         if self.kv is not None:
-            self.kv.set(_KV_KEY, json.dumps(emb), time.time())
-        logger.info("主人声纹已登记")
+            self.kv.set(_KV_KEY, json.dumps(self._owner_emb), time.time())
+        logger.info("主人声纹登记完成（3 段平均）")
         return True
 
     def reset_owner(self) -> None:
         """清掉主人声纹（下次说话重新自动登记）。"""
         self._owner_emb = None
+        self._enroll_buf = []
         if self.kv is not None:
             self.kv.set(_KV_KEY, "", time.time())
 
@@ -113,13 +132,17 @@ class VoicePrintManager:
         if emb is None:
             return None
         if not self.enrolled:
-            if self.auto_enroll:
-                self._owner_emb = emb
-                if self.kv is not None:
-                    self.kv.set(_KV_KEY, json.dumps(emb), time.time())
-                logger.info("主人声纹自动登记（第一段语音）")
-                return "owner"
-            return None
+            if not self.auto_enroll:
+                return None
+            self.enroll_owner(audio)
+            return "owner"   # 建档期间先按主人处理，避免路由中断
         sim = _cosine(emb, self._owner_emb)
-        logger.debug("声纹相似度 %.3f（阈值 %.2f）", sim, self.threshold)
-        return "owner" if sim >= self.threshold else "stranger"
+        self.last_sim = sim
+        logger.debug("声纹相似度 %.3f（主人≥%.2f 陌生人<%.2f）",
+                     sim, self.threshold, self.reject_threshold)
+        if sim >= self.threshold:
+            return "owner"
+        if sim < self.reject_threshold:
+            return "stranger"
+        # 灰区（reject~threshold）：短句/环境干扰导致的漂移，保持原判
+        return None
