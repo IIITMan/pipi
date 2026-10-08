@@ -83,7 +83,7 @@ def create_vision(cfg: Any) -> VisionProvider | None:
 
     # 摄像头驱动
     try:
-        from pipi.hardware.sim.sim_camera import OpenCVCamera
+        from pipi.hardware.sim import OpenCVCamera
         camera = OpenCVCamera(
             index=cfg.get("vision.camera_index", 0),
             width=640, height=480,
