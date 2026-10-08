@@ -4,8 +4,21 @@
 > 可以部署到实体机器人，也可以先在电脑上跑起来。
 
 **参考方案**：Giftia（稀疏记忆 / 多 Agent）+ SenseVoice（语音情感）+ Qwen（对话大脑）。
-所有外部依赖都是可插拔的 —— 缺任何一个都会自动降级，`--sim` 模式下
-**零模型、零硬件、零网络**也能完整跑通。
+`--sim` 模式下**零模型、零硬件、零网络**也能完整跑通。
+
+**部署形态**：只跑一个窗口进程（`run.py --voice` / `--mic` / 文本）。
+它内嵌 WebSocket 推送（默认 `0.0.0.0:8848`），监控/远程聊天用纯静态页
+`web/monitor.html`（双击即开），**不需要任何 Web 服务**——Docker 部署
+只需暴露这一个端口。
+
+**语音链路（全 sherpa-onnx，纯 CPU，无 torch）**：
+
+```
+待机  KWS 流式扫唤醒词（zipformer 3.3M，keywords.txt 定义「皮皮/小皮」）
+唤醒  SenseVoice int8（239MB）整段识别，剥离唤醒词拿正文 + 情感 + 事件
+聆听  VAD 切句（silero_vad.onnx）→ SenseVoice 整段识别 → 应答
+应答  LLM 流式 → 分句 TTS 边生成边播；说话可随时打断（Barge-in）
+```
 
 ---
 
@@ -40,21 +53,18 @@ python3 run.py --sim
 注意：**你不需要配任何东西**。缺的部分自动走 mock，
 矩阵里的 ✓ 就是"这条链上有东西能用"。
 
-### ② 带界面的完整体验
+### ② 监控台（纯静态页，双击即开）
 
 ```bash
 python3 scripts/seed_demo_data.py --clean --days 60   # 先造一段"相处 60 天"
-python3 run.py --web --sim                            # 打开 http://127.0.0.1:8848
+python3 run.py --sim                                  # 窗口进程（内嵌 WS 推送）
+# 然后双击打开 web/monitor.html
 ```
 
-Web 界面左边是对话（SSE 流式，气泡逐条冒出），右边是**观测台**：
-
-- **皮皮的状态** —— 当前情绪 / 好感度进度条 / 是否认主
-- **好感度曲线** —— 随时间的变化
-- **遗忘曲线** —— 每条记忆"未来 7 天会掉到多少"的预测
-- **记忆列表** —— 每条带显著性、半衰期、被想起次数，可删除 / 钉住
-
-底部两个按钮：`跑一次遗忘巡检`、`模拟「主人回家」`（没有摄像头也能演示视觉联动）。
+监控页有：**两只大眼睛**（形状即状态：待机圆眼眨眼 / 笑眼 / 委屈 / 哭泪 /
+说活弹跳 / 困了闭眼）、三轴内在状态（心情/精力/想陪）、**正在做什么**
+（巡逻/张望/打盹 + 心里想着什么）、心理事件流，以及**远程文字聊天**
+（与语音共享记忆；语音对话中会收到「稍后再聊」）。
 
 ### ③ 接上真模型（Qwen）
 
@@ -62,7 +72,7 @@ Web 界面左边是对话（SSE 流式，气泡逐条冒出），右边是**观�
 export PIPI_LLM__API_KEY=sk-xxxxxxxx
 
 # 用环境变量覆盖配置（前缀 PIPI_，双下划线表示层级）
-python3 run.py --web
+python3 run.py --voice
 ```
 
 也可以改 `configs/default.yaml` 里的 `llm.api_key`。
@@ -79,7 +89,7 @@ python3 run.py --web
 | **人格设定** | 4 套预设（傲娇/话痨/粘人/毒舌），数值化驱动行为，支持热重载 |
 | **主动关心** | 视觉触发（你回家了）+ 时间触发（你怎么不理我），带频率红线 |
 | **视觉感知** | 人脸识别认主 + 表情 + 衣着颜色，结果翻译成自然语言注入对话 |
-| **语音** | ASR（SenseVoice/云/键盘）+ TTS（CosyVoice/edge/云/打印）可插拔 |
+| **语音** | 全 sherpa-onnx 本地链：KWS 唤醒 + SenseVoice 识别（带情感）+ Silero VAD 切句；TTS 豆包流式（可插拔） |
 | **肢体动作** | 10 种语义动作（点头/摇头/看向你/探身/侧身滑开…），情绪自动映射 |
 | **硬件预留** | N100/N5015/RK3588 主控 + 轮趣 C30D 单板（头部舵机 + 灯带 + 麦轮底盘，micro-ROS） |
 
@@ -144,9 +154,9 @@ python3 scripts/audit_core.py
 ```bash
 python3 run.py                 # 文本对话（自动探测可用的模型/硬件）
 python3 run.py --sim           # 全模拟（零依赖，必定能跑）
-python3 run.py --web           # Web 界面
-python3 run.py --web --sim     # Web + 全模拟
-python3 run.py --verbose       # 显示延迟与降级信息
+python3 run.py --mic           # 麦克风语音输入
+python3 run.py --voice         # 免提模式：唤醒词 + 连续对话 + 语音播报
+python3 run.py --verbose       # 显示延迟与调试信息
 python3 run.py --user alice    # 指定用户（多用户隔离）
 python3 run.py --proactive     # 启动时先让皮皮主动说一句
 ```
@@ -160,12 +170,14 @@ src/pipi/
 ├── app.py            # 装配工厂（把一切接起来 + 健康矩阵）
 ├── domain/           # 领域模型（零依赖的纯算法层）
 ├── infra/            # 配置 / 时钟 / 事件总线 / 数据库
-├── providers/        # 各能力的多实现（asr/tts/vision/llm/motion/memory）
+├── providers/        # 各能力的实现（asr/tts/vision/llm/motion/memory）
 ├── capabilities/     # 跨 Provider 的业务能力（记忆/情绪/表达/感知）
 ├── agents/           # 三 Agent 分工 + 能力路由器
-├── orchestration/    # 主编排 + 主动引擎
-├── interfaces/       # CLI / Web
+├── orchestration/    # 主编排 + 主动引擎 + 生命模块调度
+├── life/             # 生命引擎：内在状态 / 自发念头 / 行为调度
+├── interfaces/       # CLI（窗口端，内嵌 WS 推送）+ 遗留 Web 观测台
 └── prompts/          # 人格与任务模板
+web/monitor.html      # 纯静态监控页（WS 订阅，双击即开）
 ```
 
 详见 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。
@@ -178,16 +190,16 @@ src/pipi/
 按需要加：
 
 ```bash
-# Web 界面
+# 遗留记忆观测台（可选；监控用 web/monitor.html 即可）
 pip install -e ".[web]"
 
 # 接真模型需要 YAML 解析
 pip install -e ".[llm]"
 
-# 语音理解（SenseVoice，约 900MB 模型）
-pip install -e ".[speech]"
+# 语音链路（KWS/VAD/ASR 全 sherpa-onnx；模型约 280MB 放 data/models/）
+pip install sherpa-onnx sounddevice soundfile
 
-# 语音合成（轻量方案 edge-tts）
+# 语音合成（豆包流式走 HTTP，无额外依赖；备选 edge-tts）
 pip install -e ".[tts-cloud]"
 
 # 视觉（人脸检测 + 识别）
@@ -199,9 +211,6 @@ pip install -e ".[vector]"
 
 # 接轮趣 C30D（走 ROS2 话题，需先装 ROS2 + micro-ROS agent）
 pip install -e ".[hardware]"
-
-# 一次性全装
-pip install -e ".[web,llm,speech,tts-cloud,vision-lite,vector,hardware]"
 ```
 
 ---
@@ -351,102 +360,18 @@ MIT
 
 ---
 
-## 交付文件清单
-
-完整交付包 `pipi-delivery.zip`，解压后目录结构如下（155 个文件）：
-
-### 根目录
+## 文档索引
 
 | 文件 | 内容 |
 |---|---|
-| `README.md` | 本文件，总入口与快速开始 |
-| `LICENSE` | MIT |
-
-### `docs/` · 文档
-
-| 文件 | 内容 |
-|---|---|
-| `ARCHITECTURE.md` | 软件架构、模块划分、数据流、降级链 |
-| `HARDWARE.md` | 硬件选型、BOM、三档预算方案 |
-| `CHASSIS.md` | 麦轮底盘机械设计（含 §12 自动回充与充电桩） |
-| `LLM_SELECTION.md` | 模型选型结果 + 平台选型 + 语音链路架构 |
-| `CHASSIS_REPORT.html` | 底盘可视化报告（含 SVG 图解，可直接浏览器打开） |
-| `皮皮人格Prompt方案.md` | 人格 Prompt 设计与五段式规范 |
-| `PUSH_GUIDE.md` | 代码推送指引 |
-
-### 根目录 · 可运行入口
-
-| 文件 | 说明 |
-|---|---|
-| `run.py` | 启动入口，`--sim` 零依赖演示 / `--web` 带界面 / `--voice` 免提语音 |
-| `pyproject.toml` | 项目元数据与依赖 |
-| `.env.example` | 环境变量模板（含各家云平台配置示例） |
-
-### `src/pipi/` · 源码
-
-| 子包 | 职责 |
-|---|---|
-| `domain/` | 领域模型：对话、情感、记忆、人格、运动、视觉 |
-| `agents/` | 多 Agent：对话专家、情感分析、记忆专家、能力路由 |
-| `capabilities/` | 能力实现：情感引擎、表情、记忆管理、感知 |
-| `orchestration/` | 编排：主流程、主动搭话、**自动回充控制器** |
-| `providers/` | 可插拔 Provider：llm / asr / tts / vision / memory / motion |
-| `infra/` | 基础设施：配置、时钟、数据库、事件总线、日志 |
-| `interfaces/` | 交互层：CLI + Web（SSE 流式） |
-| `prompts/` | Jinja 提示词模板 |
-| `hardware/` | 硬件抽象与仿真 |
-
-> **重点**：`providers/` 下每个能力都是「基类 + 多实现 + mock」的结构，
-> 缺依赖时自动降级，接口不变。这是整个项目能"零配置跑通"的原因。
-
-### `configs/` · 配置
-
-| 文件 | 说明 |
-|---|---|
-| `default.yaml` | 主配置（LLM / 音频链路 / 记忆 / 主动行为 / 充电 / 隐私） |
-| `degradation.yaml` | 降级策略矩阵（每个能力的优先级链 + 熔断参数） |
-| `personas/*.yaml` | 四套人格：傲娇 / 粘人 / 毒舌 / 话痨 |
-
-### `hardware/` · 机械设计
-
-| 文件 | 说明 |
-|---|---|
-| `chassis.scad` | 麦轮底盘参数化模型（含几何自检） |
-| `dock.scad` | 充电桩参数化模型（含爬电距离等安全自检） |
-| `exports/*.png` | 八张渲染图（底盘四视图 + 充电桩四视图） |
-| `exports/*.stl` `.dxf` | 可直接送 3D 打印 / 激光切割的模型 |
-| `exports/README.md` | 导出命令、渲染参数、桩体采购清单（≈¥93） |
-
-### `tests/` `scripts/` · 验证与工具
-
-| 文件 | 说明 |
-|---|---|
-| `tests/integration/test_proactive_vision.py` | 主动搭话 + 视觉 48/48 通过 |
-| `tests/integration/test_dock_controller.py` | 自动回充控制器 32/32 通过 |
-| `scripts/audit_core.py` | 核心链路走查（对话/情感/记忆/改名一致性） |
-| `scripts/seed_demo_data.py` | 造"相处 N 天"的演示数据 |
-| `scripts/demo_forgetting_curve.py` | 遗忘曲线演示 |
-| `scripts/replay_session.py` | 会话回放 |
-| `scripts/download_models.py` | 本地模型下载 |
-
----
-
-## 打包说明
-
-| 包 | 用途 |
-|---|---|
-| **`pipi-delivery.zip`** | **统一交付包**（推荐）：上面全部内容 |
-| `pipi-package.zip` | 运行包（同 delivery，保留用于增量对比） |
-| `pipi-source.zip` | 纯源码包（`src` + `configs` + `tests` + `scripts`） |
-| `pipi.bundle` | git bundle，含完整提交历史（`git clone pipi.bundle` 可还原仓库） |
-
-三个 zip 均已排除 `__pycache__` / `*.pyc` / `.pytest_cache` / `.git`。
-
-### 从 git bundle 还原仓库
-
-```bash
-git clone pipi.bundle pipi && cd pipi
-```
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 软件架构、模块划分、数据流 |
+| [`docs/LIFE_MODULE_NOTES.md`](docs/LIFE_MODULE_NOTES.md) | 生命模块设计落地与审计留痕 |
+| [`docs/GROWTH_DESIGN.md`](docs/GROWTH_DESIGN.md) | 成长系统设计（关系阶段/里程碑/偏好演化） |
+| [`docs/HARDWARE.md`](docs/HARDWARE.md) | 硬件选型、BOM、三档预算方案 |
+| [`docs/CHASSIS.md`](docs/CHASSIS.md) | 麦轮底盘机械设计（含自动回充与充电桩） |
+| [`docs/LLM_SELECTION.md`](docs/LLM_SELECTION.md) | 对话模型选型 + 语音链路架构 |
+| [`docs/CHASSIS_REPORT.html`](docs/CHASSIS_REPORT.html) | 底盘可视化报告（浏览器直接打开） |
+| [`docs/皮皮人格Prompt方案.md`](docs/皮皮人格Prompt方案.md) | 人格 Prompt 设计与五段式规范 |
 
 ---
 

@@ -43,6 +43,11 @@ _CREATE_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"别忘了\s*(.+)"), KIND_REMINDER),
     (re.compile(r"闹钟(?:定|设|调)?\s*(.+)"), KIND_ALARM),
     (re.compile(r"几点(?:叫我|喊我)\s*(.+)"), KIND_ALARM),
+    # "明早八点叫我（起床）" —— 时刻在前的闹铃句式
+    (re.compile(
+        r"((?:明早|明天早上|明天|今晚|明天晚上|晚上|早上|上午|下午|凌晨)?\s*"
+        r"[0-9一二两三四五六七八九十]{1,3}点半?)[，,]?\s*(?:叫|喊)(?:醒)?我(?:起床)?"),
+     KIND_ALARM),
     (re.compile(r"到(?:点|时间)提醒我?\s*(.+)"), KIND_REMINDER),
     (re.compile(r"(?:待办|要做的事)[:：]?\s*(.+)"), KIND_TODO),
 ]
@@ -52,30 +57,70 @@ _CANCEL_PATTERNS = re.compile(r"(?:取消|删掉|去掉)(?:提醒|闹钟|待办)
 # 确认/完成：只在"最近确有被触发记录"时生效，避免误吞普通对话
 _ACK_PATTERNS = re.compile(r"^(?:知道了|好的|好|嗯|收到|完成|做完了|搞定|记下了|嗯嗯|好哒|ok|OK)$")
 
+# 中文数字（"一分钟后" "半小时后" "十五分钟后"）→ 数值
+_CN_DIGIT = {"零": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5,
+             "六": 6, "七": 7, "八": 8, "九": 9, "半": 0.5}
+
+
+def _cn2num(s: str) -> float | None:
+    """解析中文/阿拉伯数字：'一'→1 '两'→2 '十五'→15 '半小时'的'半'→0.5。"""
+    s = s.strip()
+    if not s:
+        return None
+    if re.fullmatch(r"\d+(?:\.\d+)?", s):
+        return float(s)
+    if s in _CN_DIGIT:
+        return _CN_DIGIT[s]
+    if s == "十":
+        return 10.0
+    m = re.fullmatch(r"([一二两三四五六七八九])?十([一二三四五六七八九])?", s)
+    if m:
+        return _CN_DIGIT.get(m.group(1), 1) * 10 + _CN_DIGIT.get(m.group(2), 0)
+    return None
+
+
+_NUM = r"([0-9]+(?:\.[0-9]+)?|[一二两三四五六七八九十半]{1,3})"
+
+
+def _hn(s: str | None, default: int) -> int:
+    """时刻数字：支持中文（"八点"→8），缺省给 default。"""
+    if not s:
+        return default
+    if s.isdigit():
+        return int(s)
+    n = _cn2num(s)
+    return int(n) if n is not None else default
+
 # 时间子串规则：返回 (unix ts, 匹配到的文本)
 _WHEN_RULES: list[tuple[re.Pattern, Callable[[float, re.Match], float]]] = [
-    (re.compile(r"(\d{1,2})\s*分钟(?:后)?"),
-     lambda now, m: now + int(m.group(1)) * 60),
-    (re.compile(r"(\d{1,2})\s*小时(?:后)?"),
-     lambda now, m: now + int(m.group(1)) * 3600),
-    (re.compile(r"(\d{1,2})[:：](\d{2})"),
+    (re.compile(_NUM + r"\s*分钟(?:之|以)?后?"),
+     lambda now, m: now + (_cn2num(m.group(1)) or 1) * 60),
+    (re.compile(_NUM + r"\s*(?:小时|钟头)(?:之|以)?后?"),
+     lambda now, m: now + (_cn2num(m.group(1)) or 1) * 3600),
+    (re.compile(r"(\d{1,2})\s*[:：](\d{2})"),
      lambda now, m: _next_hhmm(now, int(m.group(1)), int(m.group(2)))),
-    (re.compile(r"(?:明天|明早)\s*(\d{1,2})?点?(半)?"),
-     lambda now, m: _next_hhmm(now, int(m.group(1) or 9),
+    (re.compile(r"(?:明天|明早)\s*([0-9一二两三四五六七八九十]{1,3})?点?(半)?"),
+     lambda now, m: _next_hhmm(now, _hn(m.group(1), 9),
                               30 if m.group(2) else 0, day_delta=1)),
-    (re.compile(r"(?:今晚|晚上)\s*(\d{1,2})?点(半)?"),
-     lambda now, m: _next_hhmm(now, int(m.group(1) or 20),
+    (re.compile(r"(?:今晚|晚上)\s*([0-9一二两三四五六七八九十]{1,3})?点(半)?"),
+     lambda now, m: _next_hhmm(now, _hn(m.group(1), 20),
                               30 if m.group(2) else 0)),
-    (re.compile(r"(?:早上|早晨)\s*(\d{1,2})?点(半)?"),
-     lambda now, m: _next_hhmm(now, int(m.group(1) or 8),
+    (re.compile(r"(?:早上|早晨)\s*([0-9一二两三四五六七八九十]{1,3})?点(半)?"),
+     lambda now, m: _next_hhmm(now, _hn(m.group(1), 8),
                               30 if m.group(2) else 0)),
-    (re.compile(r"(?:下午)\s*(\d{1,2})?点(半)?"),
-     lambda now, m: _next_hhmm(now, int(m.group(1) or 14),
+    (re.compile(r"(?:下午)\s*([0-9一二两三四五六七八九十]{1,3})?点(半)?"),
+     lambda now, m: _next_hhmm(now, _hn(m.group(1), 14),
                               30 if m.group(2) else 0)),
-    (re.compile(r"(\d{1,2})\s*点(半)?"),
-     lambda now, m: _next_hhmm(now, int(m.group(1)),
+    (re.compile(r"([0-9一二两三四五六七八九十]{1,3})\s*点(半)?"),
+     lambda now, m: _next_hhmm(now, _hn(m.group(1), 9),
                               30 if m.group(2) else 0)),
 ]
+
+# 时间在前的说法："一分钟后提醒我" "过半小时提醒我吃药" "五分钟后叫我"
+# （旧规则只认"提醒我 X"，这种说法整句漏配 → 沦为普通聊天，提醒从未创建）
+_TIME_FIRST_RE = re.compile(
+    r"^(?:帮我|给我)?(?:再|先)?(?:过|等)?(?P<when>[^，。！？]{1,12}?(?:分钟|小时|钟头|天)"
+    r"(?:之|以)?后?)[，,]?\s*(?:提醒我?|叫我|喊我)(?:一下|一声)?(?P<what>.*)$")
 
 
 def _next_hhmm(now: float, hour: int, minute: int, *, day_delta: int = 0) -> float:
@@ -124,6 +169,7 @@ class ReminderService:
             qh = (cfg or {}).get("proactive", {}).get("quiet_hours", [23, 7])
         self.quiet_hours: tuple[int, int] = tuple(qh) if len(qh) == 2 else (23, 7)
         self.ack_window_s = float(r_cfg.get("ack_window_s", 600.0))
+        self.active_uid = "owner"   # 监控面板展示谁的待办（声纹识别更新）
 
         self.speak: Callable[[str], bool] | None = None
         self.sink: Callable[[str], None] | None = None
@@ -286,6 +332,23 @@ class ReminderService:
             return False, ""
 
         # 4) 创建提醒/闹铃/待办
+
+        # 4a) 时间在前："一分钟后提醒我" "过半小时提醒我吃药" "五分钟后叫我"
+        m = _TIME_FIRST_RE.match(t)
+        if m:
+            when, _ = _parse_when(m.group("when"), now)
+            if when is not None:
+                content = m.group("what").strip("，,。 、") or "你刚才交代的事"
+                rid = self.repo.create(
+                    user_id, KIND_REMINDER, content, when, REPEAT_ONCE, now)
+                r = self.repo.get(rid)
+                self._notify("created", r)
+                when_s = self._fmt_when(when, now).strip("（）")
+                if content != "你刚才交代的事":
+                    return True, f"好，{when_s}我叫你{content}。"
+                return True, f"好，{when_s}我叫你。"
+
+        # 4b) 引导词在前："提醒我10分钟后喝水" "明早八点叫我" "待办：……"
         for pat, kind in _CREATE_PATTERNS:
             m = pat.search(t)
             if not m:
@@ -294,8 +357,11 @@ class ReminderService:
             when, matched = _parse_when(content, now)
             if when is not None and matched:
                 content = content.replace(matched, "").strip("，,。 、")
+            # 纯标点/无实义内容（如 ASR 残句"后提醒我。"抓到"。"）→ 用兜底文案
+            if content and not any(ch.isalnum() for ch in content):
+                content = ""
             if not content:
-                content = (matched or "").strip() or t
+                content = (matched or "").strip() or "你交代的事"
             remind_at = when if when is not None else now + self.default_offset_s
             rid = self.repo.create(
                 user_id, kind, content or "到点了", remind_at, REPEAT_ONCE, now)
@@ -313,8 +379,11 @@ class ReminderService:
     # ---------------- 快照（面板）----------------
 
     def snapshot(self) -> dict:
-        """活跃提醒/待办列表 + 下次触发时间（供监控面板）。"""
-        items = self.repo.list_active(self.clock.now())
+        """活跃提醒/待办列表 + 下次触发时间（供监控面板）。
+
+        展示当前说话人（active_uid，由窗口端随声纹更新）的待办。
+        """
+        items = self.repo.list_active(self.active_uid)
         self._last_snapshot = {
             "items": [{
                 "id": it["id"], "kind": it["kind"], "content": it["content"],
@@ -360,10 +429,12 @@ class ReminderService:
         content = r.get("content") or "到点了"
         kind = r.get("kind")
         if kind == KIND_ALARM:
-            return f"⏰ 到点啦：{content}"
+            return f"叮咚——闹钟响啦，{content}！该起床了！"
         if kind == KIND_TODO:
-            return f"别忘了待办：{content}"
-        return f"提醒你：{content}"
+            return f"嘿嘿，路过提醒一句：待办「{content}」还没做哦。"
+        if content == "你交代的事":
+            return "叮咚——到点啦！刚才你让我提醒的事，现在说吧。"
+        return f"叮咚——到点啦！{content}"
 
     def _notify(self, kind: str, r: dict | None, *, text: str = "") -> None:
         if self.sink is None or r is None:

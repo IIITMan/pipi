@@ -86,3 +86,30 @@
 - **P1 WebLifeHost.spoken 无上限** → `deque(maxlen=50)`
 - 部署形态变更：生命引擎监控数据不再 HTTP POST，改 `set_sink()` 回调 →
   窗口端内嵌 WS 推送（`interfaces/ws_server.py`），Web 为纯静态页订阅
+
+## 10. 2026-10-08 语音链收敛 + 记忆污染修复
+
+### 语音链（三轮收敛后的最终形态）
+
+- 阶段 1：VAD → sherpa-onnx silero_vad（去 torch）
+- 阶段 2：KWS → sherpa KeywordSpotter（zipformer 3.3M，keywords.txt 拼音 token）
+- 阶段 3：流式 ASR 试验（zipformer 14M）→ 最终**移除**；ASR 只留
+  sherpa SenseVoice int8（239MB，带情感/事件/ITN，单句 ~100ms）
+- 降级路径全部删除：SileroVAD(torch)/EnergyVAD/SenseVoiceKWS/funasr 后端
+  不复存在，模型缺失直接报错。链路 = KWS(3.3M) + VAD(silero) + ASR(239MB)，
+  全 onnxruntime，无 torch/funasr（合计省 ~2GB 内存与 1.1GB 模型盘占）
+- 弃用记录：`streaming-zipformer-bilingual-zh-en-2023-02-20` 在 sherpa 1.13.x
+  下有复读伪影（int8/fp32/beam search 均复现），勿再用
+
+### 记忆污染修复（"皮皮不知道用户名字"事故）
+
+- 病根：抽取正则把「我没有告诉你我叫什么吗」抽成 identity『他叫什么吗』
+  （pinned/imp=1.0），连同『皮皮不知道用户的名字』『他住在和你聊天啊』
+  挤掉真记忆；且 `profiles.owner.nickname` 被污染成『什么吗』直接进 Prompt
+- 修复：
+  1. 名字抽取加垃圾字符门禁；住地去掉过松「我在」分支
+  2. `_score_and_finalize` 统一质检门：候选与档案字段（nickname/call_name/
+     city/job/living）含疑问否定语气即丢弃（覆盖规则 + LLM 两条抽取路）
+  3. 存量清洗：软删 3 条垃圾记忆；profiles.owner 修复为「豆豆」
+  4. `add_milestone` 改 `INSERT OR IGNORE` 幂等静默
+- 待办（阶段 3 感官硬件接入时）：触碰/电池 → 生理变量；`distracted` 自动触发

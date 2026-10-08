@@ -221,6 +221,12 @@ class ConversationOrchestrator:
                     start = time.time()
                     pp = postprocess(reply, self.persona.speech_style)
                     bubbles = to_bubbles(pp, self.persona.speech_style)
+                    # 语音模式：喂给 TTS 管线（否则只上屏不出声）
+                    if on_chunk is not None:
+                        for b in bubbles:
+                            r = on_chunk(b.text)
+                            if asyncio.iscoroutine(r):
+                                await r
                     return TurnResult(
                         bubbles=bubbles, raw_text=reply,
                         latency_ms=int((time.time() - start) * 1000),

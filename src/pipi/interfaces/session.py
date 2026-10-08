@@ -267,7 +267,8 @@ class InteractionSession:
                  on_interrupt: Callable[[], Any] | None = None,
                  wake_ack: str = "嗯，我在。",
                  cfg: Any | None = None, verbose: bool = False,
-                 life: Any | None = None):
+                 life: Any | None = None,
+                 on_identify: Callable[[np.ndarray], str | None] | None = None):
         self.asr = asr
         self.capture = capture
         self.tts = tts
@@ -276,6 +277,9 @@ class InteractionSession:
         self.on_interrupt = on_interrupt
         self.wake_ack = wake_ack
         self.verbose = verbose
+        # 声纹识别回调：传入一段 int16 语音 → 返回 user_id（None=不判断）
+        self.on_identify = on_identify
+        self.current_user_id = ""   # 当前说话人（由 on_identify 更新）
 
         self.wake_words = tuple(cfg.get("audio.mic.wake_words", ["皮皮"]))
         self.timeout_s = cfg.get("audio.mic.session.timeout_s", 10)
@@ -330,6 +334,18 @@ class InteractionSession:
     def _notify(self, msg: str) -> None:
         if self.verbose:
             print(msg, flush=True)
+
+    def _identify_speaker(self, audio: np.ndarray) -> None:
+        """声纹识别：更新当前说话人（回调由窗口端注入）。"""
+        if self.on_identify is None:
+            return
+        try:
+            uid = self.on_identify(audio)
+        except Exception as exc:
+            logger.debug("声纹识别失败：%s", exc)
+            return
+        if uid:
+            self.current_user_id = uid
 
     @property
     def is_busy(self) -> bool:
@@ -450,7 +466,11 @@ class InteractionSession:
     async def _step(self, frame: np.ndarray) -> None:
         now = time.monotonic()
         if now < self._ignore_until:
-            return  # 回声保护窗
+            # 回声保护窗：不喂 VAD（防喇叭回声触发切句），
+            # 但帧照常进预录缓冲 —— 用户抢话不再被剪掉开头
+            if self.state in (self.IDLE, self.LISTEN):
+                self._pre_frames.append(frame)
+            return
 
         if self.state == self.IDLE:
             await self._step_idle(frame, now)
@@ -519,6 +539,7 @@ class InteractionSession:
         self.last_asr_ms = int((_t.perf_counter() - _t0) * 1000)
         text = (t.text or "").strip()
         self._notify(f"  🎤 {text or '(空)'}")
+        self._identify_speaker(audio)
 
         # 唤醒段里的退出意图（「皮皮，退下吧」）
         if self._is_exit_intent(text):
@@ -602,6 +623,7 @@ class InteractionSession:
             self._notify(f"  （噪声丢弃：{text!r}）")
             return
         self._notify(f"  🎤 {text}")
+        self._identify_speaker(audio)
 
         # 退出意图：告别一句 → 回待机
         if self._is_exit_intent(text):
@@ -716,7 +738,7 @@ class InteractionSession:
             return
         try:
             await self.tts.say(self.wake_ack)
-            self._ignore_until = time.monotonic() + 0.5  # 回声保护
+            self._ignore_until = time.monotonic() + 0.25  # 回声保护（窗口内帧进预录，不丢）
         except Exception as exc:
             logger.warning("唤醒应答播报失败：%s", exc)
 

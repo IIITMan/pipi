@@ -32,10 +32,10 @@ llm:
   # 机器人的名字（与人格名区分：人格是"傲娇"，名字是"皮皮"）
   bot_name: "皮皮"
   # ① 主对话模型：闲聊 / 共情 / 有性格的回应
-  #    火山方舟模型全名带日期后缀（/models 接口可查）
-  model: "doubao-seed-2-1-lite-260915"
-  # ② 便宜模型：记忆抽取 / 情感分析 / 观测摘要
-  cheap_model: "doubao-seed-2-1-lite-260915"
+  #    火山方舟推理接入点（= doubao-seed-2-1-pro，见控制台在线推理）
+  model: "ep-20261008132938-nzfds"
+  # ② 便宜模型：记忆抽取 / 情感分析 / 观测摘要（也走 Pro，不用 lite）
+  cheap_model: "ep-20261008132938-nzfds"
   timeout_s: 30
   max_retries: 2
   # 透传给 API 的额外字段。
@@ -179,6 +179,13 @@ audio:
       keywords_score: 1.0
       keywords_threshold: 0.25
       min_speech_s: 0.3         # 唤醒段最短时长（低于此丢弃）
+    voiceprint:
+      # 声纹识别（sherpa-onnx CAM++/ERes2Net）：区分主人与陌生人
+      # 首次说话自动登记主人声纹；之后相似度 ≥ threshold → 主人，否则陌生人
+      enabled: true
+      model: "data/models/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx"
+      threshold: 0.5            # 相似度阈值（误把陌生人当主人就调高）
+      auto_enroll: true         # 无主人声纹时，第一段语音自动登记
     session:
       timeout_s: 10             # 阶段4：会话内安静多久回待机（8~12）
       barge_in: true            # 阶段3：抢话打断（外放音箱误触发时可关）

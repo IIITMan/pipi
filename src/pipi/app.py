@@ -90,6 +90,7 @@ class App:
     motion: Any | None = None
     asr: Any | None = None
     reminders: Any | None = None
+    voiceprint: Any | None = None
     metrics: dict[str, Any] = field(default_factory=dict)
 
     def health_report(self) -> str:
@@ -455,6 +456,24 @@ def build_app(cfg: Config | None = None, *, sim: bool = False,
         reminder_service = ReminderService(repos.reminder, clk, cfg=cfg)
         orchestrator.reminders = reminder_service
 
+    # 声纹识别（主人 / 陌生人分轨，非 sim 且有麦克风时启用）
+    voiceprint_service = None
+    vp_cfg = cfg.get("audio.mic.voiceprint", {}) or {}
+    if not sim and vp_cfg.get("enabled", True):
+        try:
+            from pipi.capabilities.voiceprint import VoicePrintManager
+
+            voiceprint_service = VoicePrintManager(
+                vp_cfg.get(
+                    "model",
+                    "data/models/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx"),
+                kv_repo=repos.kv,
+                threshold=vp_cfg.get("threshold", 0.5),
+                auto_enroll=vp_cfg.get("auto_enroll", True),
+            )
+        except Exception as exc:
+            logger.warning("声纹识别不可用（%s），所有语音按主人处理", exc)
+
     # 主动引擎
     proactive_engine = ProactiveEngine(
         clock=clk,
@@ -477,4 +496,5 @@ def build_app(cfg: Config | None = None, *, sim: bool = False,
         tts=app_ctx.get("tts"), vision=app_ctx.get("vision"),
         motion=app_ctx.get("motion"), asr=app_ctx.get("asr"),
         reminders=reminder_service,
+        voiceprint=voiceprint_service,
     )

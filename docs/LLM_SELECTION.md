@@ -504,7 +504,11 @@ mock（本地规则回复）           ← 不联网，永远可用
 
 ### 落地要点
 
-**① 两套都得留着，用配置切换**
+**① 当前落地：级联已实现，且 ASR 是全离线的**
+
+现状（2026-10）：ASR/KWS/VAD 全部本地 sherpa-onnx（`data/models/`，
+无 torch、无降级），TTS 用豆包流式（云端）。断网时语音识别照常可用，
+只有回复合成受影响。下面的 S2S 配置是**未来切换时的预留位**：
 
 ```yaml
 audio:
@@ -514,9 +518,6 @@ audio:
     endpoint: "wss://openspeech.bytedance.com/api/v3/realtime/dialog"
     resource_id: "volc.speech.dialog"
 ```
-
-理由：`sensevoice` / `edge_tts` 这两条**离线链路必须保留** ——
-它们是断网时的唯一退路，且文本模式下调试更快。
 
 **② 必开三项可观测（S2S 是黑盒，这是唯一窗口）**
 

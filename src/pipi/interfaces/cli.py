@@ -64,6 +64,9 @@ class CLI:
         self._speaker: Any | None = None
         self._hub: Any | None = None
         self._chat_lock: asyncio.Lock | None = None
+        self._vp: Any | None = None
+        self._active_uid: str = user_id
+        self._last_uid: str = ""
         if (mic or voice) and app.asr is not None:
             try:
                 from pipi.providers.asr.mic import MicCapture
@@ -163,7 +166,12 @@ class CLI:
             on_query=self._respond_stream,
             on_interrupt=self._on_barge_in,
             cfg=self.app.cfg, verbose=self.verbose,
+            on_identify=self._identify_speaker,
         )
+        self._vp = getattr(self.app, "voiceprint", None)
+        self._last_uid = ""
+        if self._vp is not None:
+            print("  🔑 声纹识别已就绪（第一段语音自动登记为主人；之后自动区分主人/陌生人）")
 
         # 提醒/待办：绑定发声通道并启动（到点由皮皮自己说）
         self._reminders = getattr(self.app, "reminders", None)
@@ -268,10 +276,28 @@ class CLI:
         """应答：LLM 流式 → 逐字显示 + 分句 TTS 边生成边播放。"""
         import time as _time
 
+        self._active_uid = getattr(self._session, "current_user_id", "") \
+            or self.user_id
         if self._chat_lock is None:
             self._chat_lock = asyncio.Lock()
         async with self._chat_lock:
             await self._respond_stream_locked(text)
+
+    def _identify_speaker(self, audio) -> str | None:
+        """声纹识别回调：登记主人 / 区分陌生人。"""
+        if self._vp is None:
+            return None
+        uid = self._vp.identify(audio)
+        if uid and uid != self._last_uid:
+            if uid == "owner":
+                print("  🔑 已登记声纹：你就是主人" if not self._last_uid
+                      else "  👤 主人", flush=True)
+            elif uid == "stranger":
+                print("  👤 你是陌生人吧？我们先认识一下", flush=True)
+            self._last_uid = uid
+            if self._reminders is not None:
+                self._reminders.active_uid = uid   # 面板展示谁的待办
+        return uid
 
     async def _respond_stream_locked(self, text: str) -> None:
         import time as _time
@@ -298,7 +324,7 @@ class CLI:
             if speaker is not None:
                 await speaker.feed(delta)
 
-        result = await self.orch.handle_turn_stream(self.user_id, text,
+        result = await self.orch.handle_turn_stream(self._active_uid, text,
                                                     on_chunk=on_chunk)
         if state["printed"]:
             print(flush=True)

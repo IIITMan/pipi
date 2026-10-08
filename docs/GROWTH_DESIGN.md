@@ -4,6 +4,11 @@
 > 每一次真实互动都在改写它：关系变深、性格有记忆、表达有来历、回忆会沉淀。
 > 版本：0.2 (可实施版)・2026-10-08・在 0.1 草案基础上补充竞品设计依据、引擎详细设计、数据表与验收用例
 
+> **实施状态（2026-10-08）**：阶段 A/B 已落地 —— `orchestration/growth.py`
+> + `domain/growth.py` + `growth_milestones/growth_log` 表 + `test_growth.py`。
+> 文中「成长面板 / index.html / /growth 命令」为设计期设想，现实际入口是
+> 生命监控页（`web/monitor.html`，WS 推送）；场景路由等 D 阶段项未实装。
+
 
 
 ***

@@ -29,7 +29,7 @@
 ```
 ┌───────────────────────────────────────────────────────────────────┐
 │ L5  交互层                                                         │
-│   CLI · Web(SSE) · 语音循环 · 主动触发器 · 记忆/好感度观测台          │
+│   CLI(窗口端,内嵌WS推送) · 静态监控页 · 语音循环 · 主动触发器          │
 ├───────────────────────────────────────────────────────────────────┤
 │ L4  编排层                                                         │
 │   ConversationOrchestrator                                        │
@@ -85,11 +85,13 @@
 │   ├── ARCHITECTURE.md           # 软件架构
 │   ├── HARDWARE.md / CHASSIS.md  # 硬件选型 / 底盘机械设计
 │   ├── LLM_SELECTION.md          # 模型选型
+│   ├── GROWTH_DESIGN.md          # 成长系统设计（含验收标准）
+│   ├── LIFE_MODULE_NOTES.md      # 生命模块落地与审计留痕
 │   ├── CHASSIS_REPORT.html       # 底盘可视化报告
-│   ├── 皮皮人格Prompt方案.md      # 人格 Prompt 设计
-│   └── PUSH_GUIDE.md             # 代码推送指引
+│   └── 皮皮人格Prompt方案.md      # 人格 Prompt 设计
 ├── pyproject.toml                # 依赖分组（核心依赖为空 —— 不装也能跑）
-├── run.py                        # 统一入口（--sim / --web / --mic / --voice）
+├── web/monitor.html              # 纯静态监控页（WS 订阅，双击即开）
+├── run.py                        # 统一入口（--sim / --mic / --voice；内嵌 WS 推送）
 ├── configs/
 │   ├── default.yaml              # 主配置（含主动搭话/隐私开关）
 │   ├── degradation.yaml          # 降级链定义
@@ -401,8 +403,8 @@ FakeClock(start).jump_to_hour(2)    # 跳到凌晨 2 点（测夜间静默）
 |---|---|---|
 | 无 GPU | ONNX CPU + int8 / edge-tts / 云 API | 略慢 |
 | 无摄像头 | MockVision 读本地图片 + 脚本触发 OwnerArrived | 主动搭话仍可演示 |
-| SenseVoice 装不上 | SenseVoice → 云 ASR → MockASR(键盘输入) | 语音变打字 |
-| CosyVoice 装不上 | CosyVoice → edge-tts → 云 TTS → MockTTS(打印) | 语音变文字 |
+| sherpa 模型缺失 | KWS/VAD/ASR **无降级，启动报错**（2026-10 起语音链收敛为 sherpa 唯一方案） | 语音模式不可用，`--sim`/文本不受影响 |
+| TTS 装不上 | ark_tts → edge-tts → MockTTS(打印) | 语音变文字 |
 | InsightFace 装不上 | 保留人脸检测，"主人/陌生人"二分 | 认主精度降 |
 | 表情模型装不上 | 用 ASR 的情感标签替代视觉表情 | 略钝 |
 | 无 embedding 模型 | bge-small → **TF-IDF** → Hash | 语义检索变关键词 |
@@ -514,7 +516,7 @@ ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyUSB0 -b 921600
 #       发布 /odom；详见 HARDWARE.md §8.3）
 # configs/default.yaml:
 #   motion: { enabled: true, provider: wheeltec }
-python3 run.py --web --host 0.0.0.0
+python3 run.py --voice    # 窗口进程（WS 默认监听 0.0.0.0:8848）
 ```
 
 ### 底盘机械设计（移动形态）
@@ -633,7 +635,7 @@ python3 tests/integration/test_proactive_vision.py   # 36 项断言
 python3 scripts/demo_forgetting_curve.py             # 遗忘曲线实测
 python3 scripts/seed_demo_data.py --clean --days 60  # 造 60 天记忆
 python3 scripts/replay_session.py --limit 20         # 会话回放
-python3 run.py --web --sim                           # 端到端演示
+python3 run.py --sim                                 # 端到端演示（监控页 web/monitor.html）
 ```
 
 ---
@@ -694,7 +696,7 @@ expression 层再做长度熔断兜底。
 | 存储 | SQLite + struct 打包向量 | 单文件、零运维；embedding 打包比 JSON 小 4 倍 |
 | 向量 | 三级降级 bge→TF-IDF→Hash | 保证无模型也能语义检索（退化到关键词） |
 | 记忆 | 稀疏 + pinned | 全忘/全记都不像人；身份必须锚定 |
-| 交互 | SSE 而非 WebSocket | 回复是单向流，SSE 更简单、自动重连、走 HTTP 代理 |
+| 交互 | 监控走 WebSocket（ws_server.py 内嵌窗口进程），静态页双击即开 | 部署形态只有一个进程 + 一个端口，Docker 友好 |
 | 前端 | 单文件 HTML 零构建 | "clone 下来就能跑"比工程化更重要 |
 | 时钟 | 可注入 | 时间相关逻辑不测就等于没实现 |
 | 好感度 | sqrt 压缩 + 关系底价 | 线性衰减会让长期关系归零，不符合真实心理 |

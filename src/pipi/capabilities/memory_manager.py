@@ -49,7 +49,14 @@ def _is_junk_candidate(c: "MemoryCandidate") -> bool:
     """身份/偏好/事件/关系类候选含疑问否定语气 → 判为垃圾丢弃。"""
     if c.type not in _JUNK_TYPE_FLOOR:
         return False
-    return bool(_JUNK_CHARS.search(c.content))
+    if _JUNK_CHARS.search(c.content):
+        return True
+    # 身份错位：把助手自己的名字（皮皮/pipi）记成「用户/对方」的名字
+    # （曾产出『对方的名字是皮皮』与『用户叫豆豆』并存，令模型身份混乱）
+    if c.type is MemoryType.IDENTITY and \
+            re.search(r"(?:对方|用户|他)的?名字?是\s*(?:皮皮|pipi|PP)\b", c.content):
+        return True
+    return False
 
 
 # ---------------------------------------------------------------------------
