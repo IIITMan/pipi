@@ -20,6 +20,11 @@ from pipi.domain.memory import (
     MemoryType,
 )
 from pipi.domain.profile import UserProfile
+from pipi.domain.reminders import (
+    STATUS_CANCELLED,
+    STATUS_DONE,
+    STATUS_PENDING,
+)
 from pipi.infra.db.connection import Database
 
 logger = logging.getLogger(__name__)
@@ -670,3 +675,103 @@ class GrowthRepo:
             out.append({"kind": r["kind"], "detail": detail,
                         "created_at": r["created_at"]})
         return out
+
+
+class ReminderRepo:
+    """提醒 / 闹铃 / 待办仓储（阶段 F）。"""
+
+    def __init__(self, db: Database):
+        self.db = db
+
+    def create(self, user_id: str, kind: str, content: str,
+               remind_at: float | None, repeat: str, now: float) -> int:
+        with self.db.conn as conn:
+            cur = conn.execute(
+                "INSERT INTO reminders (user_id, kind, content, remind_at, "
+                "repeat, status, created_at) VALUES (?,?,?,?,?,?,?)",
+                (user_id, kind, content, remind_at, repeat,
+                 STATUS_PENDING, now),
+            )
+        return int(cur.lastrowid)
+
+    def list_due(self, now: float, kinds: tuple[str, ...] | None = None) -> list[dict]:
+        """到期待触发的记录（pending 且 remind_at<=now）。"""
+        sql = ("SELECT * FROM reminders WHERE status=? AND remind_at IS NOT NULL "
+               "AND remind_at<=?")
+        args: list = [STATUS_PENDING, now]
+        if kinds:
+            placeholders = ",".join("?" * len(kinds))
+            sql += f" AND kind IN ({placeholders})"
+            args.extend(kinds)
+        sql += " ORDER BY remind_at"
+        return [dict(r) for r in self.db.query(sql, tuple(args))]
+
+    def list_active(self, user_id: str) -> list[dict]:
+        """用户当前活跃的提醒/待办（含未完成 todo，按时间排序）。"""
+        rows = self.db.query(
+            "SELECT * FROM reminders WHERE user_id=? AND status=? "
+            "ORDER BY remind_at IS NULL, remind_at, created_at",
+            (user_id, STATUS_PENDING),
+        )
+        return [dict(r) for r in rows]
+
+    def get(self, rid: int) -> dict | None:
+        row = self.db.query_one(
+            "SELECT * FROM reminders WHERE id=?", (rid,))
+        return dict(row) if row else None
+
+    def complete(self, rid: int, now: float) -> bool:
+        with self.db.conn as conn:
+            cur = conn.execute(
+                "UPDATE reminders SET status=?, completed_at=? WHERE id=?",
+                (STATUS_DONE, now, rid),
+            )
+        return cur.rowcount > 0
+
+    def cancel(self, rid: int) -> bool:
+        with self.db.conn as conn:
+            cur = conn.execute(
+                "UPDATE reminders SET status=? WHERE id=?",
+                (STATUS_CANCELLED, rid),
+            )
+        return cur.rowcount > 0
+
+    def reschedule(self, rid: int, next_ts: float) -> bool:
+        """repeat 项触发后推进到下一次；一次性不调用。"""
+        with self.db.conn as conn:
+            cur = conn.execute(
+                "UPDATE reminders SET remind_at=?, fired_count=fired_count+1 "
+                "WHERE id=?",
+                (next_ts, rid),
+            )
+        return cur.rowcount > 0
+
+    def bump_fired(self, rid: int) -> None:
+        with self.db.conn as conn:
+            conn.execute(
+                "UPDATE reminders SET fired_count=fired_count+1 WHERE id=?",
+                (rid,),
+            )
+
+    def postpone(self, rid: int, next_ts: float) -> bool:
+        """静默窗口顺延：只改时间，不计触发次数。"""
+        with self.db.conn as conn:
+            cur = conn.execute(
+                "UPDATE reminders SET remind_at=? WHERE id=?",
+                (next_ts, rid),
+            )
+        return cur.rowcount > 0
+
+    def complete_recent_fired(self, user_id: str, since: float) -> int | None:
+        """返回最近一次已触发（fired_count>0）且仍 pending 的一次性记录 id。
+
+        用于语音确认闭环：用户说"知道了"时，找到最近被触发的那条。
+        只匹配 repeat='once'——周期项触发后本就继续等待下次，不应被误删。
+        """
+        row = self.db.query_one(
+            "SELECT id FROM reminders WHERE user_id=? AND status=? "
+            "AND repeat='once' AND fired_count>0 AND created_at>=? "
+            "ORDER BY created_at DESC LIMIT 1",
+            (user_id, STATUS_PENDING, since),
+        )
+        return int(row["id"]) if row else None

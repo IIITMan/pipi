@@ -37,6 +37,7 @@ from pipi.infra.db import (
     MemoryRepo,
     ProfileRepo,
     ProactiveRepo,
+    ReminderRepo,
     TurnRepo,
     UserRepo,
 )
@@ -64,6 +65,7 @@ class Repos:
     face: FaceRepo
     kv: KVRepo
     growth: "GrowthRepo"
+    reminder: ReminderRepo
 
 
 @dataclass
@@ -87,6 +89,7 @@ class App:
     vision: Any | None = None
     motion: Any | None = None
     asr: Any | None = None
+    reminders: Any | None = None
     metrics: dict[str, Any] = field(default_factory=dict)
 
     def health_report(self) -> str:
@@ -145,6 +148,7 @@ def build_repos(db: Database) -> Repos:
         face=FaceRepo(db),
         kv=KVRepo(db),
         growth=GrowthRepo(db),
+        reminder=ReminderRepo(db),
     )
 
 
@@ -443,6 +447,14 @@ def build_app(cfg: Config | None = None, *, sim: bool = False,
         growth=growth_engine,
     )
 
+    # 提醒 / 闹铃 / 待办（阶段 F）
+    reminder_service = None
+    if cfg.get("reminders.enabled", True):
+        from pipi.orchestration.reminders import ReminderService
+
+        reminder_service = ReminderService(repos.reminder, clk, cfg=cfg)
+        orchestrator.reminders = reminder_service
+
     # 主动引擎
     proactive_engine = ProactiveEngine(
         clock=clk,
@@ -464,4 +476,5 @@ def build_app(cfg: Config | None = None, *, sim: bool = False,
         sim_mode=sim,
         tts=app_ctx.get("tts"), vision=app_ctx.get("vision"),
         motion=app_ctx.get("motion"), asr=app_ctx.get("asr"),
+        reminders=reminder_service,
     )

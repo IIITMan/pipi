@@ -9,6 +9,7 @@ from pipi.infra.db.repositories import (
     MemoryRepo,
     ProfileRepo,
     ProactiveRepo,
+    ReminderRepo,
     TurnRepo,
     UserRepo,
     pack_embedding,
@@ -19,5 +20,6 @@ __all__ = [
     "Database",
     "UserRepo", "ProfileRepo", "MemoryRepo", "TurnRepo",
     "EmotionRepo", "ProactiveRepo", "DecayRepo", "FaceRepo", "KVRepo",
+    "ReminderRepo",
     "pack_embedding", "unpack_embedding",
 ]

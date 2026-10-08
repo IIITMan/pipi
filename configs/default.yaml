@@ -162,7 +162,7 @@ audio:
     silence_tail: 1.2           # 连续静音多久判定"说完"（秒）
     max_seconds: 15             # 单段录音兜底上限
     # 免提模式（run.py --voice）：唤醒词 + 自动休眠
-    wake_words: ["皮皮", "pipi", "小皮"]
+    wake_words: ["皮皮", "pipi"]
     sleep_after_s: 30           # 唤醒后安静多久回到待唤醒（秒）
     # 四阶段交互状态机
     vad:
@@ -250,6 +250,16 @@ growth:
   milestone:
     enabled: true              # 里程碑总开关（M1~M7）
     night_well_target: 100     # M6：第 N 次晚安
+
+# ---------------- 提醒 / 闹铃 / 待办（阶段 F） ----------------
+reminders:
+  enabled: true
+  tick_s: 2.0                  # 定时检查周期（秒）
+  retry_max: 3                 # 发声失败重试次数
+  retry_window_s: 120          # 发声重试总窗口（秒）
+  default_offset_s: 3600       # 解析不出时间时默认 1 小时后
+  ack_window_s: 600            # "知道了"可完成最近 10 分钟内触发的提醒
+  quiet_hours: [23, 7]         # 静默窗口：非闹铃顺延，闹铃准点必响
 
 # ---------------- 视觉 ----------------
 vision:

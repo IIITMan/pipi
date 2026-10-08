@@ -109,6 +109,11 @@
         <div id="growthMs" style="font-size:12px;margin-top:6px;line-height:1.7"></div>
         <div id="growthExpr" style="font-size:12px;color:var(--dim);margin-top:4px"></div>
       </div>
+      <div id="remindersCard" style="display:none;margin-top:12px;border-top:1px solid var(--line);padding-top:10px">
+        <h2 style="margin-bottom:6px">⏰ 提醒 / 待办</h2>
+        <div id="remindersList" style="font-size:12px;line-height:1.7"></div>
+        <div id="remindersNext" style="font-size:12px;color:var(--dim);margin-top:4px"></div>
+      </div>
     </div>
 
     <!-- 块3：聊天 + 心理记录 -->
@@ -195,7 +200,7 @@ function renderStats(p){
 }
 function applySnapshot(s){
   renderStats(s.physio); renderFace(s); renderActivity(s.activity);
-  renderGrowth(s.growth);
+  renderGrowth(s.growth); renderReminders(s.reminders);
   $("queue").textContent = s.queue; $("backend").textContent = s.action_backend;
   $("lastThought").textContent = s.last_thought ? "最近念头：" + s.last_thought : "";
 }
@@ -219,6 +224,24 @@ function renderGrowth(g){
   const ex = Object.entries(g.expressions || {}).sort((a,b)=>b[1]-a[1]).slice(0,4);
   $("growthExpr").textContent = ex.length
     ? "偷学你的话：" + ex.map(([k,c])=>`${k}×${c}`).join("、")
+    : "";
+}
+function renderReminders(r){
+  const card = $("remindersCard");
+  if (!r){ card.style.display = "none"; return; }
+  card.style.display = "";
+  const items = r.items || [];
+  $("remindersList").innerHTML = items.length
+    ? items.map(it=>{
+        const when = it.remind_at
+          ? new Date(it.remind_at*1000).toLocaleString("zh",{day:"2-digit",hour:"2-digit",minute:"2-digit"})
+          : "随时";
+        const tag = {reminder:"📌",alarm:"⏰",todo:"✅"}[it.kind] || "•";
+        return `${tag} ${it.content} <span style="color:var(--dim)">(${when})</span>`;
+      }).join("<br>")
+    : "暂无提醒与待办";
+  $("remindersNext").textContent = r.next_due
+    ? "下次触发：" + new Date(r.next_due*1000).toLocaleString("zh",{hour:"2-digit",minute:"2-digit"})
     : "";
 }
 

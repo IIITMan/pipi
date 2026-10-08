@@ -215,3 +215,22 @@ CREATE TABLE IF NOT EXISTS kv_store (
     v           TEXT,
     updated_at  REAL
 );
+
+-- ---------------- 提醒 / 闹铃 / 待办 ----------------
+-- kind: reminder(提醒) | alarm(闹铃,准点硬响) | todo(待办,无硬时间时 remind_at 为 NULL)
+-- repeat: once(一次性) | daily | weekly
+-- status: pending | done | cancelled
+CREATE TABLE IF NOT EXISTS reminders (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     TEXT NOT NULL,
+    kind        TEXT NOT NULL DEFAULT 'reminder',
+    content     TEXT NOT NULL,
+    remind_at   REAL,                        -- unix 秒；todo 无硬时间可为 NULL
+    repeat      TEXT NOT NULL DEFAULT 'once',
+    status      TEXT NOT NULL DEFAULT 'pending',
+    created_at  REAL NOT NULL,
+    completed_at REAL,
+    fired_count INTEGER DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_rem_due   ON reminders(status, remind_at);
+CREATE INDEX IF NOT EXISTS idx_rem_user  ON reminders(user_id, status, created_at DESC);

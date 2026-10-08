@@ -93,6 +93,7 @@ class ConversationOrchestrator:
         owner_name: str = "主人",
         enable_proactive_emotion: bool = True,
         growth: Any | None = None,
+        reminders: Any | None = None,
     ):
         self.llm = llm
         self.persona = persona
@@ -110,6 +111,7 @@ class ConversationOrchestrator:
         self.owner_name = owner_name
         self.enable_proactive_emotion = enable_proactive_emotion
         self.growth = growth   # GrowthEngine（可成长性，可为 None）
+        self.reminders = reminders   # ReminderService（提醒/闹铃/待办，可为 None）
 
         # 会话缓存
         self._sessions: dict[str, Session] = {}
@@ -153,6 +155,22 @@ class ConversationOrchestrator:
         persist: bool = True,
     ) -> TurnResult:
         """处理一轮对话。"""
+        # 提醒/待办入口：规则解析命中则直接返回（不消耗 LLM）
+        if self.reminders is not None:
+            try:
+                handled, reply = self.reminders.try_parse(user_id, user_text)
+                if handled:
+                    start = time.time()
+                    pp = postprocess(reply, self.persona.speech_style)
+                    bubbles = to_bubbles(pp, self.persona.speech_style)
+                    return TurnResult(
+                        bubbles=bubbles, raw_text=reply,
+                        latency_ms=int((time.time() - start) * 1000),
+                        degraded=False,
+                    )
+            except Exception as exc:
+                logger.warning("提醒意图解析失败（回落对话）：%s", exc)
+
         start, now, ctx, session, profile = self._prepare_context(
             user_id, user_text, transcript=transcript, vision=vision)
 
@@ -195,6 +213,22 @@ class ConversationOrchestrator:
         调用方可边收边喂给 TTS 分句合成，实现"边生成边播放"。
         LLM 不支持流式或流式失败时自动回退非流式。
         """
+        # 提醒/待办入口（与 handle_turn 一致：命中直接返回，不走 LLM）
+        if self.reminders is not None:
+            try:
+                handled, reply = self.reminders.try_parse(user_id, user_text)
+                if handled:
+                    start = time.time()
+                    pp = postprocess(reply, self.persona.speech_style)
+                    bubbles = to_bubbles(pp, self.persona.speech_style)
+                    return TurnResult(
+                        bubbles=bubbles, raw_text=reply,
+                        latency_ms=int((time.time() - start) * 1000),
+                        degraded=False,
+                    )
+            except Exception as exc:
+                logger.warning("提醒意图解析失败（回落对话）：%s", exc)
+
         start, now, ctx, session, profile = self._prepare_context(
             user_id, user_text, transcript=transcript, vision=vision)
 

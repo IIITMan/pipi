@@ -103,6 +103,18 @@ class CLI:
         if profile.is_new() and self.app.cfg.get("user.adoption_on_first_run", True):
             print("皮皮 > 诶，你是谁啊？\n")
 
+        # 提醒/待办（阶段 F）：文本模式到点打印
+        self._reminders = getattr(self.app, "reminders", None)
+        if self._reminders is not None:
+            def _notice(kind: str, text: str) -> None:
+                if kind == "fired":
+                    print(f"\n⏰ 皮皮提醒：{text}")
+                elif kind == "completed":
+                    print(f"  （提醒完成：{text}）")
+            self._reminders.set_sink(_notice)
+            self._reminders.start()
+            print("  ⏰ 提醒/待办已就绪（直接说「提醒我X点…」「记个待办」「有什么提醒」）")
+
         while True:
             try:
                 text = await asyncio.to_thread(input, "你   > ")
@@ -153,6 +165,13 @@ class CLI:
             cfg=self.app.cfg, verbose=self.verbose,
         )
 
+        # 提醒/待办：绑定发声通道并启动（到点由皮皮自己说）
+        self._reminders = getattr(self.app, "reminders", None)
+        if self._reminders is not None:
+            self._reminders.bind_speak(self._session.try_speak_spontaneous)
+            self._reminders.start()
+            print("  ⏰ 提醒/闹铃已就绪（说「提醒我X点…」「设闹钟…」即可）")
+
         # 生命模块（自发念头/生理状态）——空闲时皮皮会自言自语
         self._life = None
         if self.app.cfg.get("life.enabled", True) and self.app.asr is not None:
@@ -198,14 +217,21 @@ class CLI:
             if self._life is not None:
                 # E1：快照并入成长面板数据（growth 引擎存在时）
                 growth = getattr(self.app.orchestrator, "growth", None)
+                reminders_ref = getattr(self.app, "reminders", None)
 
-                def _sink(payload: dict, _g=growth) -> None:
+                def _sink(payload: dict, _g=growth, _r=reminders_ref) -> None:
                     snap = payload.get("snapshot")
-                    if snap is not None and _g is not None:
-                        try:
-                            snap["growth"] = _g.snapshot(self.user_id)
-                        except Exception:
-                            pass
+                    if snap is not None:
+                        if _g is not None:
+                            try:
+                                snap["growth"] = _g.snapshot(self.user_id)
+                            except Exception:
+                                pass
+                        if _r is not None:
+                            try:
+                                snap["reminders"] = _r.snapshot()
+                            except Exception:
+                                pass
                     self._hub.publish(payload)
 
                 self._life.set_sink(_sink)
@@ -219,6 +245,11 @@ class CLI:
         except (KeyboardInterrupt, asyncio.CancelledError):
             print("\n皮皮 > 那你走吧……哼")
         finally:
+            if self._reminders is not None:
+                try:
+                    await self._reminders.stop()
+                except Exception:
+                    pass
             if self._hub is not None:
                 try:
                     await self._hub.stop()
