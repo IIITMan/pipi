@@ -63,192 +63,121 @@ def match_wake(text: str, wake_words: tuple[str, ...]) -> tuple[bool, str]:
 # VAD：人声检测 + 端点检测
 # ---------------------------------------------------------------------------
 
-class SileroVAD:
-    """Silero VAD（torch，约 2MB 模型）—— 质量最好的人声/端点检测。"""
+class SherpaVAD:
+    """sherpa-onnx VAD —— silero_vad 的 onnx 版（唯一 VAD 方案）。
 
-    name = "silero"
+    推理走 onnxruntime，无 torch 依赖：
+      - 去掉 torch 推理开销（每帧不用过 torch）
+      - 不需要 torch/torchaudio 依赖，镜像更小
+      - 端点参数（阈值/静音尾/最短发声）与 torch 版语义一致
+    段检测语义：accept_waveform 后 sherpa 在"说完"时吐出一个语音段
+    （front/pop），此时返回 'end'；is_speech_detected() 由 False
+    变 True（需累计 min_speech_duration）时返回 'start'。
+    """
 
-    def __init__(self, threshold: float = 0.5, min_silence_ms: int = 600,
-                 speech_pad_ms: int = 30):
-        from silero_vad import VADIterator, load_silero_vad
+    name = "sherpa"
 
-        self._it = VADIterator(
-            load_silero_vad(), sampling_rate=16000,
-            threshold=threshold, min_silence_duration_ms=min_silence_ms,
-            speech_pad_ms=speech_pad_ms,
+    def __init__(self, model_path: str, threshold: float = 0.5,
+                 min_silence_ms: int = 600, min_speech_ms: int = 250,
+                 num_threads: int = 1):
+        import sherpa_onnx
+
+        config = sherpa_onnx.VadModelConfig(
+            silero_vad=sherpa_onnx.SileroVadModelConfig(
+                model=str(model_path),
+                threshold=threshold,
+                min_silence_duration=max(min_silence_ms, 1) / 1000.0,
+                min_speech_duration=max(min_speech_ms, 1) / 1000.0,
+                window_size=512,
+                max_speech_duration=20.0,
+            ),
+            sample_rate=16000,
+            num_threads=num_threads,
+            provider="cpu",
+            debug=False,
         )
+        # buffer_size_in_seconds 在部分版本不存在 → 双写法兜底
+        try:
+            self._vad = sherpa_onnx.VoiceActivityDetector(
+                config, buffer_size_in_seconds=30)
+        except TypeError:
+            self._vad = sherpa_onnx.VoiceActivityDetector(config)
+        self._in_speech = False
 
     def reset(self) -> None:
-        self._it.reset_states()
+        try:
+            self._vad.reset()
+        except Exception:
+            pass
+        self._in_speech = False
 
     def process(self, frame: np.ndarray) -> str | None:
         """输入 16k 单声道 int16 帧（512 样本 = 32ms）。返回 'start'/'end'/None。"""
-        frame = np.asarray(frame).reshape(-1)   # (512,1) → (512,)，silero 只认一维
-        if len(frame) < 512:
-            return None  # silero 要求 ≥512 样本（上游已保证固定帧，这里兜底）
-        import torch
-
-        t = torch.from_numpy(frame.astype(np.float32) / 32768.0)
-        d = self._it(t, 16000)
-        if not d:
+        samples = np.asarray(frame).reshape(-1).astype(np.float32) / 32768.0
+        if samples.size == 0:
             return None
-        if "start" in d:
-            return "start"
-        if "end" in d:
+        self._vad.accept_waveform(samples)
+
+        # 语音段出队 = 这句话说完了（注意：front 是属性不是方法，只需 pop）
+        if self._drain_segments():
+            self._in_speech = False
             return "end"
-        return None
 
-
-class EnergyVAD:
-    """能量 VAD —— silero-vad 不可用时的兜底（RMS 阈值 + 静音尾判定）。"""
-
-    name = "energy"
-
-    def __init__(self, threshold: float, min_silence_ms: int = 600,
-                 speech_pad_ms: int = 30):
-        self._thr = threshold
-        self._min_silence_frames = max(min_silence_ms // 32, 1)
-        self._silence_run = 0
-        self._in_speech = False
-
-    def reset(self) -> None:
-        self._silence_run = 0
-        self._in_speech = False
-
-    def process(self, frame: np.ndarray) -> str | None:
-        loud = _rms(frame) >= self._thr
-        if not self._in_speech:
-            if loud:
-                self._in_speech = True
-                self._silence_run = 0
-                return "start"
-            return None
-        if loud:
-            self._silence_run = 0
-        else:
-            self._silence_run += 1
-            if self._silence_run >= self._min_silence_frames:
-                self._in_speech = False
-                return "end"
-        return None
-
-
-def make_vad(capture: Any, cfg: Any) -> SileroVAD | EnergyVAD:
-    provider = cfg.get("audio.mic.vad.provider", "auto")
-    threshold = cfg.get("audio.mic.vad.threshold", 0.5)
-    min_silence = cfg.get("audio.mic.vad.min_silence_ms", 600)
-    if provider in ("auto", "silero"):
         try:
-            vad = SileroVAD(threshold=threshold, min_silence_ms=min_silence)
-            logger.info("VAD: silero")
-            return vad
+            speaking = bool(self._vad.is_speech_detected())
         except Exception as exc:
-            logger.info("silero-vad 不可用（%s），退回能量 VAD", exc)
-    thr = capture.threshold if hasattr(capture, "threshold") else 300.0
-    return EnergyVAD(threshold=thr, min_silence_ms=min_silence)
+            logger.debug("sherpa is_speech_detected 失败：%s", exc)
+            speaking = False
+        if speaking and not self._in_speech:
+            self._in_speech = True
+            return "start"
+        return None
+
+    def _drain_segments(self) -> bool:
+        """清空已完成的语音段，返回是否清空过（= 检测到端点）。"""
+        ended = False
+        try:
+            while not self._vad.empty():
+                try:
+                    self._vad.pop()
+                except TypeError:
+                    # 个别版本 pop 语义不同，避免死循环
+                    break
+                ended = True
+        except Exception as exc:
+            logger.debug("sherpa 段清空失败：%s", exc)
+        return ended
+
+
+def make_vad(cfg: Any) -> SherpaVAD:
+    """VAD 工厂：只保留 sherpa-onnx 方案（模型/依赖缺失直接报错，不降级）。"""
+    from pipi.infra.config import PROJECT_ROOT
+
+    model = cfg.get("audio.mic.vad.model", "data/models/vad/silero_vad.onnx")
+    mp = Path(model)
+    if not mp.is_absolute():
+        mp = PROJECT_ROOT / model
+    if not mp.exists():
+        raise RuntimeError(
+            f"VAD 模型缺失：{mp}（唯一方案 sherpa-onnx，请放置 silero_vad.onnx）")
+    vad = SherpaVAD(
+        str(mp),
+        threshold=cfg.get("audio.mic.vad.threshold", 0.5),
+        min_silence_ms=cfg.get("audio.mic.vad.min_silence_ms", 600),
+        min_speech_ms=cfg.get("audio.mic.vad.min_speech_ms", 250),
+    )
+    logger.info("VAD: sherpa-onnx（%s）", mp)
+    return vad
 
 
 # ---------------------------------------------------------------------------
 # KWS：待机唤醒词检测
 # ---------------------------------------------------------------------------
 
-class SenseVoiceKWS:
-    """能量门控 + 按需识别的 KWS。
 
-    待机态逐帧只做能量判断（几乎零开销）；检测到有声突发并结束时，
-    才把这一小段送 SenseVoice 验证是否为唤醒词。
-    好处：安静房间里 SenseVoice 几乎不会被调用，待机功耗趋近于零；
-    相比纯能量门控又不会把任何响声误判成唤醒。
-    """
 
-    name = "sensevoice"
-    FRAME_MS = 0.032
 
-    def __init__(self, asr: Any, capture: Any, wake_words: tuple[str, ...],
-                 min_speech_s: float = 0.3, max_seg_s: float = 8.0,
-                 silence_frames: int = 12, pre_roll_s: float = 0.4,
-                 on_debug: Callable[[str], None] | None = None):
-        self.asr = asr
-        self.capture = capture
-        self.wake_words = tuple(w.lower() for w in wake_words)
-        self.min_speech_s = min_speech_s
-        self.max_seg_s = max_seg_s
-        self.silence_frames = silence_frames   # 12 帧 ≈ 0.38s 静音判定段结束
-        self.on_debug = on_debug
-        self.last_asr_ms = 0
-        self._pre: deque = deque(maxlen=max(int(pre_roll_s / self.FRAME_MS), 1))
-        self._pre_saved: list[np.ndarray] = []
-        self._seg: list[np.ndarray] = []
-        self._silence = 0
-        self._active = False
 
-    def reset(self) -> None:
-        self._seg.clear()
-        self._silence = 0
-        self._active = False
-
-    def _debug(self, msg: str) -> None:
-        if self.on_debug is not None:
-            try:
-                self.on_debug(msg)
-            except Exception:
-                pass
-
-    def _amplify(self, audio: np.ndarray) -> np.ndarray:
-        gain = getattr(self.capture, "gain", 1.0)
-        if gain != 1.0:
-            audio = np.clip(audio.astype(np.float32) * gain,
-                            -32768, 32767).astype(np.int16)
-        return audio
-
-    async def process(self, frame: np.ndarray) -> tuple[bool, str] | None:
-        """逐帧推进。命中唤醒返回 (True, 唤醒词后正文)，否则 None。"""
-        loud = _rms(frame) >= self.capture.threshold
-        if not self._active:
-            if loud:
-                self._active = True
-                self._pre_saved = list(self._pre)   # 起始前预录，防丢字
-                self._seg = [frame]
-                self._silence = 0
-            else:
-                self._pre.append(frame)
-            return None
-
-        self._seg.append(frame)
-        if loud:
-            self._silence = 0
-        else:
-            self._silence += 1
-
-        dur = len(self._seg) * self.FRAME_MS
-        if self._silence < self.silence_frames and dur < self.max_seg_s:
-            return None
-
-        # 有声突发结束：整段送识别验证
-        audio = np.concatenate(self._pre_saved + self._seg).flatten()
-        speech_s = dur - self._silence * self.FRAME_MS
-        self.reset()
-        if speech_s < self.min_speech_s:
-            return None
-
-        import time as _t
-        _t0 = _t.perf_counter()
-        try:
-            t = await self.asr.transcribe(
-                self._amplify(audio).tobytes(), self.capture.sample_rate)
-        except Exception as exc:
-            logger.warning("KWS 识别失败：%s", exc)
-            return None
-        self.last_asr_ms = int((_t.perf_counter() - _t0) * 1000)
-        text = (t.text or "").strip()
-        if not text:
-            self._debug(f"  （KWS 段识别为空，speech={speech_s:.1f}s）")
-            return None
-        hit, rest = match_wake(text, self.wake_words)
-        self._debug(f"  （KWS 段：{text!r} → 命中={hit} 正文={rest!r}）")
-        if hit:
-            return True, rest
-        return None
 
 
 class SherpaKWS:
@@ -300,40 +229,24 @@ class SherpaKWS:
         return None
 
 
-def make_kws(asr: Any, capture: Any, cfg: Any,
-             wake_words: tuple[str, ...],
-             on_debug: Callable[[str], None] | None = None):
-    """KWS 工厂：auto 时优先 sherpa-onnx 专用 KWS（模型在则用），
-    否则退回"能量门控 + SenseVoice 验证"方案。
-    """
+def make_kws(cfg: Any) -> SherpaKWS:
+    """KWS 工厂：只保留 sherpa-onnx 专用 KWS（模型缺失直接报错，不降级）。"""
     from pipi.infra.config import PROJECT_ROOT
 
-    provider = cfg.get("audio.mic.kws.provider", "auto")
     model_dir = cfg.get("audio.mic.kws.model_dir", "data/models/kws")
     if not Path(model_dir).is_absolute():
         model_dir = PROJECT_ROOT / model_dir
-
-    if provider in ("auto", "sherpa"):
-        try:
-            import sherpa_onnx  # noqa: F401
-            if Path(model_dir, "tokens.txt").exists():
-                kws = SherpaKWS(
-                    str(model_dir),
-                    keywords_score=cfg.get("audio.mic.kws.keywords_score", 1.0),
-                    keywords_threshold=cfg.get("audio.mic.kws.keywords_threshold", 0.25),
-                    min_speech_s=cfg.get("audio.mic.kws.min_speech_s", 0.3),
-                )
-                logger.info("KWS: sherpa-onnx（%s）", model_dir)
-                return kws
-        except Exception as exc:
-            logger.info("sherpa KWS 不可用（%s），退回 SenseVoice 方案", exc)
-
-    return SenseVoiceKWS(
-        asr, capture, wake_words,
+    if not Path(model_dir, "tokens.txt").exists():
+        raise RuntimeError(
+            f"KWS 模型缺失：{model_dir}（唯一方案 sherpa KeywordSpotter）")
+    kws = SherpaKWS(
+        str(model_dir),
+        keywords_score=cfg.get("audio.mic.kws.keywords_score", 1.0),
+        keywords_threshold=cfg.get("audio.mic.kws.keywords_threshold", 0.25),
         min_speech_s=cfg.get("audio.mic.kws.min_speech_s", 0.3),
-        silence_frames=cfg.get("audio.mic.kws.silence_frames", 12),
-        on_debug=on_debug,
     )
+    logger.info("KWS: sherpa-onnx（%s）", model_dir)
+    return kws
 
 
 # ---------------------------------------------------------------------------
@@ -376,11 +289,8 @@ class InteractionSession:
         if prewarm is not None:
             asyncio.create_task(self._safe_prewarm(prewarm))
 
-        self.vad = make_vad(capture, cfg)
-        self.kws = make_kws(
-            asr, capture, cfg, self.wake_words,
-            on_debug=(lambda m: print(m, flush=True)) if verbose else None,
-        )
+        self.vad = make_vad(cfg)
+        self.kws = make_kws(cfg)
 
         self.state = self.IDLE
         self.last_asr_ms = 0
@@ -665,7 +575,7 @@ class InteractionSession:
             self._pre_frames.append(frame)
 
     async def _on_segment(self, seg: list[np.ndarray]) -> None:
-        """一句话说完 → 识别 → 进入应答。"""
+        """一句话说完 → SenseVoice 整段识别 → 进入应答。"""
         audio = np.concatenate(seg).flatten()
         gain = getattr(self.capture, "gain", 1.0)
         if gain != 1.0:   # 与 KWS 一致：识别前加软件增益
@@ -678,7 +588,8 @@ class InteractionSession:
 
         _t0 = _t.perf_counter()
         try:
-            t = await self.asr.transcribe(audio.tobytes(), self.capture.sample_rate)
+            t = await self.asr.transcribe(audio.tobytes(),
+                                          self.capture.sample_rate)
         except Exception as exc:
             self._notify(f"  ✗ 识别失败：{exc}")
             return

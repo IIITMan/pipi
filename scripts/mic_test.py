@@ -6,8 +6,8 @@
     python scripts/mic_test.py --auto     # 自动模式：录 5 秒即识别（用于管道/自动化）
     python scripts/mic_test.py --list     # 列出音频设备
 
-依赖：pip install sounddevice funasr modelscope torch soundfile
-模型：iic/SenseVoiceSmall（首次自动下载，已缓存则直接加载）
+依赖：pip install sounddevice sherpa-onnx soundfile
+模型：data/models/sherpa-onnx-sense-voice-…int8-2024-07-17
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ if hasattr(sys.stdout, "reconfigure"):
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from pipi.providers.asr.sensevoice import SenseVoiceASR  # noqa: E402
+from pipi.providers.asr.sherpa_offline import SherpaSenseVoiceASR  # noqa: E402
 
 SAMPLE_RATE = 16000
 CHANNELS = 1
@@ -84,7 +84,7 @@ def rms(audio: np.ndarray) -> float:
     return float(np.sqrt(np.mean(audio.astype(np.float64) ** 2))) if audio.size else 0.0
 
 
-async def transcribe_once(asr: SenseVoiceASR, audio: np.ndarray) -> None:
+async def transcribe_once(asr: SherpaSenseVoiceASR, audio: np.ndarray) -> None:
     level = rms(audio)
     print(f"  音量 RMS = {level:.0f}（静音阈值 {SILENCE_RMS:.0f}）")
     if level < SILENCE_RMS:
@@ -107,13 +107,11 @@ async def main() -> None:
         list_devices()
         return
 
-    print("正在加载 SenseVoice（首次需下载，已缓存则数秒）…")
-    asr = SenseVoiceASR(device="cpu")
-    if not asr.is_available():
-        print("✗ funasr 未安装：", asr._load_error)
-        return
-    asr._ensure_model()
-    print("✓ 模型就绪，设备：", asr._device)
+    print("正在加载 SenseVoice（sherpa int8）…")
+    model_dir = os.path.join(os.path.dirname(__file__), "..", "data", "models",
+                             "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17")
+    asr = SherpaSenseVoiceASR(model_dir)
+    print("✓ 模型就绪")
 
     print("\n默认输入设备：", sd.query_devices(kind="input")["name"])
 

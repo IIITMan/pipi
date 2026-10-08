@@ -118,14 +118,13 @@ audio:
     # S2S 只负责"聊"，这些意图转交文本 LLM + 工具链
     delegate_to_agent: ["记忆写入", "记忆查询", "天气", "云台动作", "回充", "控制指令"]
 
-  # ASR 降级链：从上到下挑第一个可用的
-  asr_chain: ["sensevoice", "cloud_dashscope", "mock"]
+  # ASR：唯一方案 sherpa-onnx（无降级；模型缺失 → 麦克风输入不可用）
+  asr_chain: ["sensevoice"]
   asr:
     sensevoice:
-      # 本地模型目录（data/models/，已在 .gitignore）—— 启动零联网、零重复下载
-      # 删除该目录后 funasr 会自动回退为按 model id 从 ModelScope 下载
-      model: "data/models/SenseVoiceSmall"
-      device: "auto"           # auto | cpu | cuda
+      # sherpa-onnx SenseVoice int8（无 torch/funasr，内存 ~300MB）
+      sherpa_model_dir: "data/models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17"
+      num_threads: 2
       use_itn: true            # 逆文本正则化（数字/标点）
       language: "auto"
     cloud_dashscope:
@@ -167,15 +166,19 @@ audio:
     sleep_after_s: 30           # 唤醒后安静多久回到待唤醒（秒）
     # 四阶段交互状态机
     vad:
-      provider: "auto"          # auto=优先 silero（质量好），退回 energy
-      threshold: 0.5
+      # 唯一方案：sherpa-onnx silero_vad（模型缺失启动报错，不降级）
+      model: "data/models/vad/silero_vad.onnx"
+      threshold: 0.5            # 人声判定阈值
       min_silence_ms: 600       # 端点检测：连续静音判句（600~800 可调）
+      min_speech_ms: 250        # 最短发声时长（低于此不算开口，抗噪）
     kws:
-      provider: "auto"          # auto=优先 sherpa-onnx 专用KWS，退回 sensevoice 方案
+      # 唯一方案：sherpa-onnx KeywordSpotter（模型缺失启动报错，不降级）
       model_dir: "data/models/kws"   # sherpa zipformer 中文 KWS（3.3M 参数）
+      # 唤醒词写在 data/models/kws/keywords.txt（拼音 token + @词，如 `p í p í @皮皮`）
+      # 注意：该模型为中文 KWS，不支持英文唤醒词
       keywords_score: 1.0
       keywords_threshold: 0.25
-      min_speech_s: 0.3         # sensevoice 兜底方案参数
+      min_speech_s: 0.3         # 唤醒段最短时长（低于此丢弃）
     session:
       timeout_s: 10             # 阶段4：会话内安静多久回待机（8~12）
       barge_in: true            # 阶段3：抢话打断（外放音箱误触发时可关）

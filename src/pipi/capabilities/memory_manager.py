@@ -37,6 +37,20 @@ from pipi.domain.dialogue import new_id
 
 logger = logging.getLogger(__name__)
 
+# 垃圾候选门禁：疑问/否定/闲聊语气的"事实"不该被当记忆存下来
+# （曾把"我没有告诉你我叫什么吗"抽成 identity"他叫什么吗"且 pinned，污染召回）
+_JUNK_CHARS = re.compile(r"什么|吗|呢|吧|啊|嘛|哪|谁|怎么|为什么|不知道|"
+                         "没有告诉|是不是|要不要|好不好|可不可以")
+_JUNK_TYPE_FLOOR = {MemoryType.IDENTITY, MemoryType.PREFERENCE,
+                    MemoryType.EVENT, MemoryType.RELATION}
+
+
+def _is_junk_candidate(c: "MemoryCandidate") -> bool:
+    """身份/偏好/事件/关系类候选含疑问否定语气 → 判为垃圾丢弃。"""
+    if c.type not in _JUNK_TYPE_FLOOR:
+        return False
+    return bool(_JUNK_CHARS.search(c.content))
+
 
 # ---------------------------------------------------------------------------
 # 规则抽取的词典
@@ -176,14 +190,16 @@ class MemoryManager:
         # --- 1. 身份信息 ---
         if m := re.search(r"(?:我叫|我是|叫我|你可以叫我)([\u4e00-\u9fa5A-Za-z·]{1,8})", text):
             name = m.group(1)
-            updates["nickname"] = name
-            updates["call_name"] = name
-            result.candidates.append(MemoryCandidate(
-                type=MemoryType.IDENTITY, content=f"他叫{name}",
-                importance=1.0, pinned=True,
-            ))
+            # 疑问/否定句不是自我介绍（"我叫什么吗" "我是不是…"）
+            if not _JUNK_CHARS.search(name):
+                updates["nickname"] = name
+                updates["call_name"] = name
+                result.candidates.append(MemoryCandidate(
+                    type=MemoryType.IDENTITY, content=f"他叫{name}",
+                    importance=1.0, pinned=True,
+                ))
 
-        if m := re.search(r"我(?:住在|在|来自)([\u4e00-\u9fa5]{2,10}?)(?:市|区|县|$|[，。！？\s])", text):
+        if m := re.search(r"我(?:住在|来自)([\u4e00-\u9fa5]{2,10}?)(?:市|区|县|$|[，。！？\s])", text):
             updates["city"] = m.group(1)
             result.candidates.append(MemoryCandidate(
                 type=MemoryType.IDENTITY, content=f"他住在{m.group(1)}",
@@ -275,6 +291,22 @@ class MemoryManager:
         emotion_intensity: float,
     ) -> ExtractResult:
         """按类型修正重要性，并决定是否 pinned。"""
+        # 档案字段同样过质检门（nickname 曾被污染成"什么吗"直接进 Prompt）
+        for key in ("nickname", "call_name", "city", "job", "living"):
+            val = result.profile_updates.get(key)
+            if isinstance(val, str) and _JUNK_CHARS.search(val):
+                logger.debug("丢弃垃圾档案更新：%s=%r", key, val)
+                result.profile_updates.pop(key)
+
+        kept: list[MemoryCandidate] = []
+        for c in result.candidates:
+            # 质检门：疑问/否定语气的"事实"直接丢弃（覆盖规则与 LLM 两条路）
+            if _is_junk_candidate(c):
+                logger.debug("丢弃垃圾记忆候选：%r", c.content)
+                continue
+            kept.append(c)
+        result.candidates = kept
+
         for c in result.candidates:
             # 类型下限/上限
             floor = IMPORTANCE_FLOOR.get(c.type, 0.4)

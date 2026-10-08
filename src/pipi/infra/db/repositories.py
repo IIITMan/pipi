@@ -621,17 +621,17 @@ class GrowthRepo:
             (user_id, code)) is not None
 
     def add_milestone(self, user_id: str, code: str, text: str, now: float) -> bool:
-        """幂等写入：已存在（UNIQUE 冲突）返回 False；其他异常记日志。"""
+        """幂等写入：已存在静默返回 False，不刷警告。"""
         import logging as _log
 
         try:
             with self.db.conn as conn:
-                conn.execute(
-                    "INSERT INTO growth_milestones (user_id, code, text, created_at) "
-                    "VALUES (?,?,?,?)",
+                cur = conn.execute(
+                    "INSERT OR IGNORE INTO growth_milestones "
+                    "(user_id, code, text, created_at) VALUES (?,?,?,?)",
                     (user_id, code, text, now),
                 )
-            return True
+            return cur.rowcount > 0
         except Exception as exc:
             _log.getLogger(__name__).warning(
                 "add_milestone(%s, %s) 失败：%s", user_id, code, exc)
