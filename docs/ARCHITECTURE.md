@@ -282,10 +282,10 @@ affection = max(affection_floor(), affection)   # 认主 → 底价 300
 AI 味立刻暴露。
 
 ```python
-# ✗ 错误
+# × 错误
 system += '{"owner_present":true,"owner_newly_arrived":true,"clothing":{"owner":{"color_names":["灰色"]}}}'
 
-# ✓ 正确（VisionObservation.to_hint）
+# √ 正确（VisionObservation.to_hint）
 system += "[你看到的] 主人刚回来了，他现在穿着灰色的衣服，看起来挺高兴"
 ```
 
@@ -415,13 +415,13 @@ FakeClock(start).jump_to_hour(2)    # 跳到凌晨 2 点（测夜间静默）
 
 ```
 能力健康矩阵：
-  asr          sensevoice✗
-  tts          ark_tts✗ → edge_tts✗ → mock✓
-  llm          doubao✗ → deepseek✗ → mock✓
-  vision       full✓ → detect_only✓ → mock✓
-  embedding    bge_small✓ → tfidf✓
-  voiceprint   sherpa✗
-  motion       wheeltec✗ → mock✓
+  asr          sensevoice×
+  tts          ark_tts× → edge_tts× → mock√
+  llm          doubao× → deepseek× → mock√
+  vision       full√ → detect_only√ → mock√
+  embedding    bge_small√ → tfidf√
+  voiceprint   sherpa×
+  motion       wheeltec× → mock√
 ```
 
 **熔断器**：某个 Provider 连续失败 3 次后熔断 60 秒（半开重试），
@@ -604,15 +604,15 @@ CLI 里 `/privacy` 查看开关，`/forget N` 删单条，`/reset` 清空全部�
 
 | 验证项 | 方式 | 结果 |
 |---|---|---|
-| 稀疏衰减 | 虚拟时钟快进 30 天 | 身份 sal=1.0 不变；闲聊 18h 半衰期；30 天后淘汰 ✓ |
-| 检索强化 | 反复提及同一事实 | access_count 累积，"他叫阿哲"被想起 134 次 ✓ |
-| 人格 5 问 | e2e 脚本 | 拒绝写报告 / 接情绪 / 吃醋 / 否认是 AI ✓ |
-| 视觉→语言 | 单测 | 输出自然语言，无 JSON 泄漏 ✓ |
-| 回家打招呼 | 集成测试 | 触发 return_home，冷却期内不重复 ✓ |
-| 频率控制 | 集成测试 | 上限/静默/降频/恢复全部生效 ✓ |
-| 触发器 | FakeClock 快进 | idle/morning/night_sleep/重要日子/情绪跟进 全通过 ✓ |
-| 优先级 | 集成测试 | 回家(90) 压过 闲置(50) ✓ |
-| 运动层 | 集成测试 | Mock 语义动作 + C30D 单板（头部/灯/麦轮六轴）✓ |
+| 稀疏衰减 | 虚拟时钟快进 30 天 | 身份 sal=1.0 不变；闲聊 18h 半衰期；30 天后淘汰 √ |
+| 检索强化 | 反复提及同一事实 | access_count 累积，"他叫阿哲"被想起 134 次 √ |
+| 人格 5 问 | e2e 脚本 | 拒绝写报告 / 接情绪 / 吃醋 / 否认是 AI √ |
+| 视觉→语言 | 单测 | 输出自然语言，无 JSON 泄漏 √ |
+| 回家打招呼 | 集成测试 | 触发 return_home，冷却期内不重复 √ |
+| 频率控制 | 集成测试 | 上限/静默/降频/恢复全部生效 √ |
+| 触发器 | FakeClock 快进 | idle/morning/night_sleep/重要日子/情绪跟进 全通过 √ |
+| 优先级 | 集成测试 | 回家(90) 压过 闲置(50) √ |
+| 运动层 | 集成测试 | Mock 语义动作 + C30D 单板（头部/灯/麦轮六轴）√ |
 | **合计** | `tests/integration/test_proactive_vision.py` | **48/48 通过** |
 
 遗忘曲线的实测数据（`scripts/demo_forgetting_curve.py` 输出）：

@@ -109,12 +109,12 @@ class CLI:
         if self._reminders is not None:
             def _notice(kind: str, text: str) -> None:
                 if kind == "fired":
-                    print(f"\n⏰ 皮皮提醒：{text}")
+                    print(f"\n皮皮提醒：{text}")
                 elif kind == "completed":
                     print(f"  （提醒完成：{text}）")
             self._reminders.set_sink(_notice)
             self._reminders.start()
-            print("  ⏰ 提醒/待办已就绪（直接说「提醒我X点…」「记个待办」「有什么提醒」）")
+            print("  提醒/待办已就绪（直接说「提醒我X点…」「记个待办」「有什么提醒」）")
 
         while True:
             try:
@@ -123,6 +123,9 @@ class CLI:
                 print("\n皮皮 > 那你走吧……哼")
                 break
 
+            # 非 UTF-8 管道/终端可能解码出 surrogate 残留（\udcxx），
+            # 不清洗会一路传到 sqlite 落库时才报错
+            text = text.encode("utf-8", "surrogateescape").decode("utf-8", "replace")
             text = text.strip()
             if not text:
                 continue
@@ -142,11 +145,11 @@ class CLI:
         print(f"  {self.app.health_report()}\n")
         words = " / ".join(self.app.cfg.get("audio.mic.wake_words", ["皮皮"]))
         timeout = self.app.cfg.get("audio.mic.session.timeout_s", 10)
-        print(f"  🎙️ 免提模式：喊「{words}」唤醒 → 连续对话（VAD 切句，不用重复唤醒）")
+        print(f"  免提模式：喊「{words}」唤醒 → 连续对话（VAD 切句，不用重复唤醒）")
         print(f"     回复时可插话打断；安静 {timeout}s 自动回待机。Ctrl+C 退出\n")
 
         # 环境噪声校准：保持安静 1 秒
-        print("  🎚️ 正在校准环境噪声（请保持安静 1 秒）…")
+        print("  正在校准环境噪声（请保持安静 1 秒）…")
         try:
             await asyncio.get_running_loop().run_in_executor(
                 None, self.mic.calibrate)
@@ -165,14 +168,14 @@ class CLI:
         self._vp = getattr(self.app, "voiceprint", None)
         self._last_uid = ""
         if self._vp is not None:
-            print("  🔑 声纹识别已就绪（第一段语音自动登记为主人；之后自动区分主人/陌生人）")
+            print("  声纹识别已就绪（第一段语音自动登记为主人；之后自动区分主人/陌生人）")
 
         # 提醒/待办：绑定发声通道并启动（到点由皮皮自己说）
         self._reminders = getattr(self.app, "reminders", None)
         if self._reminders is not None:
             self._reminders.bind_speak(self._session.try_speak_spontaneous)
             self._reminders.start()
-            print("  ⏰ 提醒/闹铃已就绪（说「提醒我X点…」「设闹钟…」即可）")
+            print("  提醒/闹铃已就绪（说「提醒我X点…」「设闹钟…」即可）")
 
         # 生命模块（PULSE 心搏 / 旧 LifeEngine，可配置回退）
         #   pulse.backend: "pulse"(默认，LivingLoop) | "legacy"(旧引擎)
@@ -190,7 +193,7 @@ class CLI:
                 _logging.getLogger("pipi.pulse").setLevel(_logging.INFO)
             label = "PULSE 心搏（呼吸/潮汐/预感/羁绊/日记成长）" \
                 if backend != "legacy" else "生命模块"
-            print(f"  🫀 {label}已启动（空闲时会自发念叨、微动作）")
+            print(f"  {label}已启动（空闲时会自发念叨、微动作）")
 
         # WebSocket 推送：静态监控页直接订阅（无 Web 服务依赖）
         await self._setup_monitor_push()
@@ -304,7 +307,7 @@ class CLI:
                     self._hub.publish(payload)
 
                 self._life.set_sink(_sink)
-            print(f"  📡 监控数据推送 ws://{ws_host}:{ws_port}/ws"
+            print(f"  监控数据推送 ws://{ws_host}:{ws_port}/ws"
                   f"（双击打开 web/monitor.html 即可查看）")
         except Exception as exc:
             print(f"  （WebSocket 推送不可用：{exc}）")
@@ -332,16 +335,16 @@ class CLI:
             return None
         uid = self._vp.identify(audio)
         if not self._vp.enrolled and getattr(self._vp, "_enroll_buf", None):
-            print(f"  🔑 声纹登记中 {len(self._vp._enroll_buf)}/"
+            print(f"  声纹登记中 {len(self._vp._enroll_buf)}/"
                   f"{self._vp.enroll_target}（再说几句完成建档）", flush=True)
         if self.verbose and getattr(self._vp, "last_sim", None) is not None:
-            print(f"  🎙 声纹相似度 {self._vp.last_sim:.2f}", flush=True)
+            print(f"  声纹相似度 {self._vp.last_sim:.2f}", flush=True)
         if uid and uid != self._last_uid:
             if uid == "owner":
-                print("  🔑 已登记声纹：你就是主人" if not self._last_uid
-                      else "  👤 主人", flush=True)
+                print("  已登记声纹：你就是主人" if not self._last_uid
+                      else "  主人", flush=True)
             elif uid == "stranger":
-                print("  👤 你是陌生人吧？我们先认识一下", flush=True)
+                print("  你是陌生人吧？我们先认识一下", flush=True)
             self._last_uid = uid
             if self._reminders is not None:
                 self._reminders.active_uid = uid   # 面板展示谁的待办
@@ -389,7 +392,7 @@ class CLI:
         if self.verbose:
             llm = getattr(self.app.llm, "last_latency_ms", 0)
             s = self._session
-            print(f"  ⏱ 语音 {s.last_utt_s:.1f}s → ASR {s.last_asr_ms}ms"
+            print(f"  语音 {s.last_utt_s:.1f}s → ASR {s.last_asr_ms}ms"
                   f" → 首响 {state['ttfb_ms']}ms"
                   f" → 编排完成 {result.latency_ms}ms"
                   f"{' [降级]' if result.degraded else ''}", flush=True)
@@ -403,7 +406,7 @@ class CLI:
             await self.orch.speak(result.bubbles)
         if self.verbose:
             total = (_time.perf_counter() - t0) * 1000
-            print(f"  ⏱ 说话→回完 {total:.0f}ms ｜ 记忆已写入 "
+            print(f"  说话→回完 {total:.0f}ms ｜ 记忆已写入 "
                   f"{len(result.memories_written)} 条", flush=True)
 
     async def _on_remote_chat(self, text: str) -> None:
@@ -437,7 +440,7 @@ class CLI:
 
         if self.verbose:
             llm = getattr(self.app.llm, "last_latency_ms", 0)
-            print(f"  ⏱ 编排 {result.latency_ms}ms（LLM {llm}ms）"
+            print(f"  编排 {result.latency_ms}ms（LLM {llm}ms）"
                   f"{' [降级]' if result.degraded else ''}"
                   f" 记忆 召回{len(result.memories_used)}/写入{len(result.memories_written)}")
         print()
@@ -542,7 +545,7 @@ class CLI:
             print("  │ 里程碑    暂无")
         prefs = gp.preferences.get("like") or {}
         for k, v in list(prefs.items())[:6]:
-            bar = "█" * int(v) + "░" * (10 - int(v))
+            bar = "█" * int(v) + "·" * (10 - int(v))
             print(f"  │ 偏好      {k} {bar} {v:.1f}")
         expr = gp.learned_expressions
         if expr:
@@ -610,7 +613,7 @@ class CLI:
         print(f"  ┌─ 记忆（共 {len(items)} 条）──────────────")
         for i, m in enumerate(items, 1):
             sal = m.salience(now)
-            flag = "📌" if m.pinned else "  "
+            flag = "★" if m.pinned else "  "
             hl = m.half_life_hours()
             hl_s = "永不" if hl == float("inf") else f"{hl:.0f}h"
             print(f"  │ {i:2d}. {flag}[{m.type.value:10s}] {m.content[:30]:32s}")

@@ -25,6 +25,11 @@ from pipi.infra import Config, setup_logging
 
 
 def main():
+    # Windows 中文控制台（GBK 代码页）兜底：不可编码字符降级显示而非崩溃
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="replace")
+
     ap = argparse.ArgumentParser(description="皮皮 · 情感陪伴机器人")
     ap.add_argument("--sim", action="store_true",
                     help="全模拟模式（无模型/无硬件也能跑）")

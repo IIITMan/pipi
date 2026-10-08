@@ -198,7 +198,7 @@ def _register_fallbacks(cfg: Config, sim: bool, router: CapabilityRouter) -> Non
     # 云端两家（qwen / deepseek）互为灾备，全挂时由上面的 mock 用规则话术兜住。
 
     # 视觉链上是 "full" / "detect_only"，需要显式注册这两个降级档位，
-    # 否则链走到底会找不到 provider（健康矩阵显示 ✗）。
+    # 否则链走到底会找不到 provider（健康矩阵显示 ×）。
     try:
         from pipi.providers.vision.mock import MockVision
         from pipi.providers.vision.pipeline import VisionPipeline

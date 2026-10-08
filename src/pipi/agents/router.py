@@ -136,6 +136,6 @@ class CapabilityRouter:
             states = []
             for name in chain:
                 ok = self._health.get(f"{cap}:{name}", self._health.get(name, False))
-                states.append(f"{name}{'✓' if ok else '✗'}")
+                states.append(f"{name}{'√' if ok else '×'}")
             lines.append(f"  {cap:12s} {' → '.join(states)}")
         return "\n".join(lines)

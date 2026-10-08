@@ -1,4 +1,4 @@
-﻿"""云端 ASR —— 通义（DashScope）Paraformer / OpenAI Whisper。
+"""云端 ASR —— 通义（DashScope）Paraformer / OpenAI Whisper。
 
 本地模型装不上时的第二选择。需要 API Key。
 统一输出 Transcript（云端不给情感时标 NEUTRAL）。

@@ -27,7 +27,7 @@ class MockActionAdapter(ActionAdapter):
             "wander_turn": "随机转向漫游",
         }
         if intent.action_type in _SEMANTIC:
-            logger.info("[mock-action]   ↳ %s", _SEMANTIC[intent.action_type])
+            logger.info("[mock-action]   -> %s", _SEMANTIC[intent.action_type])
         if intent.action_type == "freeze":
             logger.info("[mock-action] 全部运动停止，仅保留最低亮度呼吸灯")
 

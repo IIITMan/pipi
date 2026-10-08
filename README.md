@@ -38,13 +38,13 @@ python3 run.py --sim
    ╰──────────────────────────────────╯
   ...
 能力健康矩阵：
-  asr          sensevoice✗
-  tts          ark_tts✗ → edge_tts✗ → mock✓
-  llm          doubao✗ → deepseek✗ → mock✓
-  vision       full✓ → detect_only✓ → mock✓
-  embedding    bge_small✓ → tfidf✓
-  voiceprint   sherpa✗
-  motion       wheeltec✗ → mock✓
+  asr          sensevoice×
+  tts          ark_tts× → edge_tts× → mock√
+  llm          doubao× → deepseek× → mock√
+  vision       full√ → detect_only√ → mock√
+  embedding    bge_small√ → tfidf√
+  voiceprint   sherpa×
+  motion       wheeltec× → mock√
 
 皮皮 > 诶，你是谁啊？
 你   > 我叫阿哲，我喜欢喝美式
@@ -52,7 +52,7 @@ python3 run.py --sim
 ```
 
 注意：**你不需要配任何东西**。缺的部分自动走 mock，
-矩阵里的 ✓ 就是"这条链上有东西能用"。
+矩阵里的 √ 就是"这条链上有东西能用"。
 
 ### ② 监控台（纯静态页，双击即开）
 
@@ -245,10 +245,10 @@ pip install -e ".[hardware]"
 ### 2. 为什么不把视觉 JSON 塞给模型？
 
 ```python
-# ✗ 模型会变得像在读传感器日志
+# × 模型会变得像在读传感器日志
 '{"owner_present":true,"clothing":{"owner":{"color_names":["灰色"]}}}'
 
-# ✓ 模型会像真的看见了你
+# √ 模型会像真的看见了你
 '[你看到的] 主人刚回来了，他现在穿着灰色的衣服，看起来挺高兴'
 ```
 
@@ -327,25 +327,25 @@ ROS2+micro-ROS 部署步骤、C30D 固件要点、引脚映射表与避坑清单
 ```
 tests/integration/test_proactive_vision.py  ←  48/48 通过
 
-  ✓ 视觉→语言翻译（无 JSON 泄漏）
-  ✓ 回家打招呼闭环（视觉→主动引擎→生成）
-  ✓ 冷却期不重复开口
-  ✓ 每日上限 / 夜间静默 / 被忽视降频 / 回应后恢复
-  ✓ 虚拟时钟快进：idle / morning / night_sleep / 重要日子 / 情绪跟进
-  ✓ 优先级：回家(90) 压过 闲置(50)
-  ✓ MockMotion 语义动作 + 轮趣 C30D 单板（头部 / 灯 / 麦轮六轴）
+  √ 视觉→语言翻译（无 JSON 泄漏）
+  √ 回家打招呼闭环（视觉→主动引擎→生成）
+  √ 冷却期不重复开口
+  √ 每日上限 / 夜间静默 / 被忽视降频 / 回应后恢复
+  √ 虚拟时钟快进：idle / morning / night_sleep / 重要日子 / 情绪跟进
+  √ 优先级：回家(90) 压过 闲置(50)
+  √ MockMotion 语义动作 + 轮趣 C30D 单板（头部 / 灯 / 麦轮六轴）
 
 tests/integration/test_dock_controller.py  ←  32/32 通过
 
-  ✓ 回充触发（低电 / 闲置 / 到点；充电中不重复触发）
-  ✓ 低电提醒话术（先说一声再走，不默默消失）
-  ✓ 三段式对齐 5 拍内收敛（vx 缩距 / vy 调心偏 / wz 调角偏）
-  ✓ vy 与 wz 正交性（纯旋转不动位置，纯平移不动航向）
-  ✓ 未对正时禁止前进（防歪着撞桩）
-  ✓ 超时 → 冷却重试 → 超次数 FAIL
-  ✓ 有人靠近(<0.8m)立即暂停让路
-  ✓ 触点闭合无电流 10s → FAULT；有电流 3s → CHARGING
-  ✓ 远程视觉段 → 近程红外段切换；视觉丢失退回 SEEK
+  √ 回充触发（低电 / 闲置 / 到点；充电中不重复触发）
+  √ 低电提醒话术（先说一声再走，不默默消失）
+  √ 三段式对齐 5 拍内收敛（vx 缩距 / vy 调心偏 / wz 调角偏）
+  √ vy 与 wz 正交性（纯旋转不动位置，纯平移不动航向）
+  √ 未对正时禁止前进（防歪着撞桩）
+  √ 超时 → 冷却重试 → 超次数 FAIL
+  √ 有人靠近(<0.8m)立即暂停让路
+  √ 触点闭合无电流 10s → FAULT；有电流 3s → CHARGING
+  √ 远程视觉段 → 近程红外段切换；视觉丢失退回 SEEK
 
 scripts/audit_core.py  ←  核心链路走查（对话/情感/记忆/改名一致性）全部通过
 ```

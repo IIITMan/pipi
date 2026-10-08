@@ -405,7 +405,7 @@ class InteractionSession:
         self._ignore_until = now + 0.4
         if self.life is not None:
             self.life.on_farewell()   # 告别计入念叨冷却，防止退出后立刻自言自语
-        self._notify("  💤 已回待机（再喊唤醒词继续）")
+        self._notify("  已回待机（再喊唤醒词继续）")
 
     async def _speak_spontaneous(self, text: str) -> None:
         await self._speak_line(text, prefix="皮皮（自言自语）> ")
@@ -451,7 +451,7 @@ class InteractionSession:
                 except (asyncio.QueueFull, RuntimeError):
                     pass  # 忙时丢帧，宁缺毋滥
 
-        self._notify(f"  💤 待机中…（喊「{'/'.join(self.wake_words)}」唤醒）")
+        self._notify(f"  待机中…（喊「{'/'.join(self.wake_words)}」唤醒）")
         with sd.InputStream(samplerate=self.capture.sample_rate, channels=1,
                             dtype="int16", blocksize=512, callback=_mic_cb):
             while self._running:
@@ -496,7 +496,7 @@ class InteractionSession:
         hit = await self.kws.process(frame)
         if hit and not self._wake_hit:
             self._wake_hit = True
-            self._notify("  🔑 检测到唤醒词…（说完需求或停顿即可）")
+            self._notify("  检测到唤醒词…（说完需求或停顿即可）")
 
         ev = self.vad.process(frame)
         if ev == "start" and not self._seg_active:
@@ -534,23 +534,23 @@ class InteractionSession:
         try:
             t = await self.asr.transcribe(audio.tobytes(), self.capture.sample_rate)
         except Exception as exc:
-            self._notify(f"  ✗ 唤醒段识别失败：{exc}")
+            self._notify(f"  × 唤醒段识别失败：{exc}")
             return
         self.last_asr_ms = int((_t.perf_counter() - _t0) * 1000)
         text = (t.text or "").strip()
-        self._notify(f"  🎤 {text or '(空)'}")
+        self._notify(f"  {text or '(空)'}")
         self._identify_speaker(audio)
 
         # 唤醒段里的退出意图（「皮皮，退下吧」）
         if self._is_exit_intent(text):
-            self._notify("  👋 退出对话，回待机")
+            self._notify("  退出对话，回待机")
             self._start_farewell()
             return
 
         # KWS 已在声学层命中，ASR 文本只用来剥离唤醒词拿正文
         _hit, rest = match_wake(text, self.wake_words)
         if rest:
-            self._notify("  👂 已唤醒（带需求）")
+            self._notify("  已唤醒（带需求）")
             self.state = self.RESPOND
             self._resp_started = time.monotonic()
             self._loud_frames = 0
@@ -558,7 +558,7 @@ class InteractionSession:
             return
 
         # 纯唤醒（「皮皮」或文本剥离失败）→ 应答后进聆听
-        self._notify("  👂 已唤醒！")
+        self._notify("  已唤醒！")
         await self._play_ack()
         self._enter_listen(time.monotonic())
 
@@ -573,7 +573,7 @@ class InteractionSession:
 
         # 会话超时：安静太久回待机
         if now - self._last_voice > self.timeout_s and not self._seg_active:
-            self._notify(f"  💤 安静 {self.timeout_s}s，回待机（再喊唤醒词继续）")
+            self._notify(f"  安静 {self.timeout_s}s，回待机（再喊唤醒词继续）")
             self.vad.reset()
             self.kws.reset()
             self._wake_hit = False
@@ -612,7 +612,7 @@ class InteractionSession:
             t = await self.asr.transcribe(audio.tobytes(),
                                           self.capture.sample_rate)
         except Exception as exc:
-            self._notify(f"  ✗ 识别失败：{exc}")
+            self._notify(f"  × 识别失败：{exc}")
             return
         self.last_asr_ms = int((_t.perf_counter() - _t0) * 1000)
         text = (t.text or "").strip()
@@ -622,12 +622,12 @@ class InteractionSession:
         if not any(ch.isalnum() for ch in text) or len(text) < 2:
             self._notify(f"  （噪声丢弃：{text!r}）")
             return
-        self._notify(f"  🎤 {text}")
+        self._notify(f"  {text}")
         self._identify_speaker(audio)
 
         # 退出意图：告别一句 → 回待机
         if self._is_exit_intent(text):
-            self._notify("  👋 退出对话，回待机")
+            self._notify("  退出对话，回待机")
             self._start_farewell()
             return
 
@@ -680,7 +680,7 @@ class InteractionSession:
                 self._seg_start = max(0, len(self._pending) - 1)
             self._loud_frames += 1
             if self.verbose and self._loud_frames % 3 == 0:
-                self._notify(f"  ✋ 打断累计 {self._loud_frames * self.FRAME_MS * 1000:.0f}ms"
+                self._notify(f"  打断累计 {self._loud_frames * self.FRAME_MS * 1000:.0f}ms"
                              f"（RMS {level:.0f} / 需 {self.capture.threshold * self.barge_mult:.0f}）")
         else:
             self._loud_frames = 0
@@ -688,7 +688,7 @@ class InteractionSession:
             self._do_barge_in(now)
 
     def _do_barge_in(self, now: float) -> None:
-        self._notify("  ✋ 打断！停播、听你说…")
+        self._notify("  打断！停播、听你说…")
         if self.life is not None:
             self.life.on_barge_in()
         if self._resp_task is not None:

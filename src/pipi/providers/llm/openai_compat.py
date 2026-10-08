@@ -254,8 +254,8 @@ def _split_sentences(text: str, max_len: int = 40) -> list[str]:
 
 PRESETS = {
     # 选型依据见 LLM_SELECTION.md（全云端方案）。
-    # 闲聊走 Flash 档：≤32K 输入 ¥0.2 / 输出 ¥0.8（每百万 Token），
-    # 实测约 ¥0.15/千轮。成本不是约束，延迟与人格稳定性才是。
+    # 闲聊走 Flash 档：≤32K 输入 ￥0.2 / 输出 ￥0.8（每百万 Token），
+    # 实测约 ￥0.15/千轮。成本不是约束，延迟与人格稳定性才是。
     "qwen": {
         "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
         "model": "qwen3-flash",
