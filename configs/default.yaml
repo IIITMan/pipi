@@ -17,6 +17,13 @@ user:
   # 首次运行的"领养仪式"：皮皮会主动问名字
   adoption_on_first_run: true
 
+# ---------------- 天气工具 ----------------
+# 免费 Open-Meteo API（免 key、零成本）。对话出现天气意图时自动查，
+# 结果注入对话让皮皮用人格口吻回答；失败/断网时静默降级。
+weather:
+  enabled: true
+  city: "济南"              # 部署城市（可改，如 "北京"）
+
 # ---------------- 人格 ----------------
 persona:
   active: "tsundere"           # 对应 configs/personas/<id>.yaml
@@ -163,7 +170,7 @@ audio:
     max_seconds: 15             # 单段录音兜底上限
     # 免提模式（run.py --voice）：唤醒词 + 自动休眠
     # "pp"/"p p"：SenseVoice 常把「皮皮」转写成字母
-    wake_words: ["皮皮", "pipi", "pp", "p p", "小皮"]
+    wake_words: ["皮皮", "pipi"]
     sleep_after_s: 30           # 唤醒后安静多久回到待唤醒（秒）
     # 四阶段交互状态机
     vad:
@@ -296,8 +303,12 @@ vision:
     recognize: true            # 人脸识别（认主）
     expression: true           # 表情识别
     clothing: true             # 衣着颜色
-  detector: "yunet"            # yunet | mediapipe | opencv_haar
+  detector: "yunet"            # yunet | mediapipe
+  detector_model: "data/models/face_detection_yunet_2023mar.onnx"
   recognizer: "insightface"    # insightface | none
+  # 监控页画面推流（JPEG 经 WS 到 web/monitor.html；只推流不落盘）
+  monitor_stream: true
+  monitor_fps: 0.5
   expression_model: "hsemotion" # hsemotion | fer | none
   face_match_threshold: 0.45   # 人脸比对的余弦阈值
   enroll_dir: "data/faces"     # 主人照片目录

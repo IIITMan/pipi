@@ -1,9 +1,8 @@
 """人脸检测与识别。
 
-检测器优先级：
-  1. OpenCV YuNet（最轻，ONNX，无需额外依赖，精度够用）
-  2. MediaPipe
-  3. OpenCV Haar 级联（最古老，兜底）
+检测器：
+  1. OpenCV YuNet（最轻，ONNX；模型由 scripts/download_models.py 预先下载）
+  2. MediaPipe（可选）
 
 识别器：
   InsightFace（arcface 特征）—— 装不上就只做"有人/没人"判断。
@@ -16,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from pipi.domain.vision import BBox
+from pipi.infra.config import PROJECT_ROOT
 
 logger = logging.getLogger(__name__)
 
@@ -25,42 +25,58 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 class YuNetDetector:
-    """OpenCV 内置的 YuNet 人脸检测器（轻量、快、准）。"""
+    """OpenCV 内置的 YuNet 人脸检测器（轻量、快、准）。
+
+    模型文件预先下载到 data/models/（scripts/download_models.py --only vision_det），
+    运行时零下载。模型缺失时 is_available=False（诚实降级，不做 Haar 兜底）。
+    """
 
     name = "yunet"
+
+    DEFAULT_MODEL = "data/models/face_detection_yunet_2023mar.onnx"
 
     def __init__(self, score_threshold: float = 0.6, model_path: str = ""):
         self.score_threshold = score_threshold
         self.model_path = model_path
         self._detector: Any = None
 
+    def _model_path(self) -> Path:
+        """解析模型文件：显式配置 → 项目 data/models → 系统常见位置。"""
+        candidates = []
+        if self.model_path:
+            candidates.append(Path(self.model_path))
+            if not Path(self.model_path).is_absolute():
+                candidates.append(PROJECT_ROOT / self.model_path)
+        candidates.append(PROJECT_ROOT / self.DEFAULT_MODEL)
+        candidates.append(Path.home() / ".cache/opencv/face_detection_yunet_2023mar.onnx")
+        candidates.append(Path("/usr/share/opencv4/models/face_detection_yunet_2023mar.onnx"))
+        for c in candidates:
+            if c.exists():
+                return c
+        return candidates[-1]
+
     def is_available(self) -> bool:
         try:
             import cv2
-            return hasattr(cv2, "FaceDetectorYN")
+            if not hasattr(cv2, "FaceDetectorYN"):
+                return False
         except ImportError:
             return False
+        return self._model_path().exists()
 
     def _ensure(self, frame_shape: tuple[int, int]) -> None:
         if self._detector is not None:
             return
         import cv2
         h, w = frame_shape
-        path = self.model_path
-        if not path or not Path(path).exists():
-            # OpenCV 自带模型路径（不同版本位置不同，尝试常见位置）
-            candidates = [
-                "/usr/share/opencv4/models/face_detection_yunet_2023mar.onnx",
-                str(Path.home() / ".cache/opencv/face_detection_yunet_2023mar.onnx"),
-            ]
-            path = next((c for c in candidates if Path(c).exists()), "")
-        if path and Path(path).exists():
-            self._detector = cv2.FaceDetectorYN.create(path, "", (w, h),
+        path = self._model_path()
+        if path.exists():
+            self._detector = cv2.FaceDetectorYN.create(str(path), "", (w, h),
                                                        self.score_threshold)
         else:
-            # 没有 onnx 模型 → 退到 Haar
-            logger.debug("YuNet 模型缺失，退到 Haar 级联")
-            self._detector = _HaarFallback()
+            logger.warning("YuNet 模型缺失（%s）—— 检测不可用，"
+                           "运行 scripts/download_models.py --only vision_det 下载",
+                           path)
 
     def detect(self, frame) -> list[BBox]:
         try:
@@ -70,8 +86,8 @@ class YuNetDetector:
         h, w = frame.shape[:2]
         self._ensure((h, w))
 
-        if isinstance(self._detector, _HaarFallback):
-            return self._detector.detect(frame)
+        if self._detector is None:
+            return []
 
         try:
             self._detector.setInputSize((w, h))
@@ -85,44 +101,6 @@ class YuNetDetector:
             return out
         except Exception as exc:
             logger.debug("YuNet 检测失败：%s", exc)
-            return []
-
-
-class HaarDetector:
-    """OpenCV Haar 级联 —— 最老的方案，但永远可用。"""
-
-    name = "opencv_haar"
-
-    def __init__(self):
-        self._cascade = None
-
-    def is_available(self) -> bool:
-        try:
-            import cv2
-            return hasattr(cv2, "CascadeClassifier")
-        except ImportError:
-            return False
-
-    def detect(self, frame) -> list[BBox]:
-        import cv2
-        if self._cascade is None:
-            path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-            self._cascade = cv2.CascadeClassifier(path)
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        faces = self._cascade.detectMultiScale(gray, 1.1, 5, minSize=(40, 40))
-        return [BBox(int(x), int(y), int(w), int(h)) for x, y, w, h in faces]
-
-
-class _HaarFallback:
-    """YuNet 模型缺失时的内部兜底。"""
-
-    def __init__(self):
-        self._haar = HaarDetector()
-
-    def detect(self, frame) -> list[BBox]:
-        try:
-            return self._haar.detect(frame)
-        except Exception:
             return []
 
 
@@ -252,19 +230,3 @@ class InsightFaceRecognizer:
         for f in faces:
             if f.get("embedding"):
                 self._enrolled[f["person_id"]] = f["embedding"]
-
-    def detect_faces(self, frame) -> list[BBox]:
-        """用 InsightFace 自带检测器出人脸框。
-
-        YuNet 缺模型文件、Haar 在 opencv 5.0 下不可用 —— 识别器的
-        检测是最可靠的兜底（process_frame 检出 0 脸时调用）。
-        """
-        try:
-            self._ensure()
-            out = []
-            for f in self._app.get(frame):
-                x1, y1, x2, y2 = [int(v) for v in f.bbox[:4]]
-                out.append(BBox(x=x1, y=y1, w=max(0, x2 - x1), h=max(0, y2 - y1)))
-            return out
-        except Exception:
-            return []

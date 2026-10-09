@@ -96,15 +96,6 @@ class VisionPipeline:
                 boxes = self.detector.detect(frame)
             except Exception as exc:
                 logger.debug("检测失败：%s", exc)
-        if not boxes and self.recognizer is not None \
-                and self.recognizer.is_available() \
-                and hasattr(self.recognizer, "detect_faces"):
-            # YuNet 缺模型 / Haar 在 opencv 5.0 缺 CascadeClassifier 时，
-            # 用 InsightFace 自带检测兜底 —— 否则整个视觉链"失明"
-            try:
-                boxes = self.recognizer.detect_faces(frame)
-            except Exception as exc:
-                logger.debug("识别器兜底检测失败：%s", exc)
         obs.person_count = len(boxes)
 
         # ---- 2. 逐脸识别 ----

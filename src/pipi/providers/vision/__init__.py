@@ -8,7 +8,6 @@ from typing import Any
 from pipi.providers.vision.base import VisionProvider
 from pipi.providers.vision.clothing import ColorClothingAnalyzer
 from pipi.providers.vision.detector import (
-    HaarDetector,
     InsightFaceRecognizer,
     MediaPipeDetector,
     YuNetDetector,
@@ -33,7 +32,6 @@ def _create_detector(name: str, model_path: str = "") -> Any:
     candidates = {
         "yunet": lambda: YuNetDetector(model_path=model_path),
         "mediapipe": MediaPipeDetector,
-        "opencv_haar": HaarDetector,
     }
     if name in candidates:
         d = candidates[name]()
@@ -41,7 +39,7 @@ def _create_detector(name: str, model_path: str = "") -> Any:
             return d
     # 按优先级自动挑
     for factory in (lambda: YuNetDetector(model_path=model_path),
-                    MediaPipeDetector, HaarDetector):
+                    MediaPipeDetector):
         try:
             d = factory()
             if d.is_available():
@@ -49,6 +47,8 @@ def _create_detector(name: str, model_path: str = "") -> Any:
                 return d
         except Exception:
             continue
+    logger.warning("无人脸检测器可用 —— 运行 scripts/download_models.py "
+                   "--only vision_det 下载 YuNet 模型")
     return None
 
 
@@ -95,7 +95,8 @@ def create_vision(cfg: Any) -> VisionProvider | None:
         logger.info("摄像头初始化失败：%s，改用 MockVision", exc)
         return MockVision()
 
-    detector = _create_detector(cfg.get("vision.detector", "yunet")) \
+    detector = _create_detector(cfg.get("vision.detector", "yunet"),
+                                cfg.get("vision.detector_model", "")) \
         if caps_cfg.get("detect", True) else None
     recognizer = _create_recognizer(cfg.get("vision.recognizer", "insightface"),
                                     cfg.get("vision.face_match_threshold", 0.45)) \
@@ -114,7 +115,7 @@ def create_vision(cfg: Any) -> VisionProvider | None:
 __all__ = [
     "VisionProvider", "VisionPipeline", "MockVision", "create_mock_vision",
     "make_arrival_observation", "make_absence_observation",
-    "YuNetDetector", "HaarDetector", "MediaPipeDetector",
+    "YuNetDetector", "MediaPipeDetector",
     "InsightFaceRecognizer",
     "HsemotionRecognizer", "FERRecognizer", "NullExpressionRecognizer",
     "ColorClothingAnalyzer",

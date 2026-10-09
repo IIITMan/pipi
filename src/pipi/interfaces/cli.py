@@ -64,6 +64,7 @@ class CLI:
         self._session: Any | None = None
         self._speaker: Any | None = None
         self._hub: Any | None = None
+        self._stream_task: Any | None = None
         self._life: Any | None = None
         self._chat_lock: asyncio.Lock | None = None
         self._vp: Any | None = None
@@ -209,11 +210,20 @@ class CLI:
         # WebSocket 推送：静态监控页直接订阅（无 Web 服务依赖）
         await self._setup_monitor_push()
 
+        # 摄像头画面 → 监控页（JPEG 推流，只推不落盘）
+        if (self.app.cfg.get("vision.monitor_stream", True)
+                and type(self.app.vision).__name__ == "VisionPipeline"
+                and self._hub is not None):
+            self._stream_task = asyncio.create_task(
+                self._camera_stream(), name="camera-stream")
+
         try:
             await self._session.run()
         except (KeyboardInterrupt, asyncio.CancelledError):
             print("\n皮皮 > 那你走吧……哼")
         finally:
+            if self._stream_task is not None:
+                self._stream_task.cancel()
             if self._reminders is not None:
                 try:
                     await self._reminders.stop()
@@ -341,6 +351,31 @@ class CLI:
         if self._speaker is not None:
             self._speaker.abort()
             self._speaker = None
+
+    async def _camera_stream(self) -> None:
+        """摄像头画面 → 监控页：JPEG base64 经 WS 推流（只推不落盘）。"""
+        import base64
+        import time as _time
+
+        import cv2
+
+        interval = 1.0 / max(float(self.app.cfg.get("vision.monitor_fps", 0.5)), 0.1)
+        cam = self.app.vision.camera
+        while True:
+            try:
+                frame = await cam.read()
+                if frame is not None:
+                    small = cv2.resize(frame, (320, 240))
+                    ok, buf = cv2.imencode(
+                        ".jpg", small, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
+                    if ok and self._hub is not None:
+                        data = "data:image/jpeg;base64," + base64.b64encode(buf).decode()
+                        self._hub.broadcast({"type": "camera", "data": data})
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                pass
+            await asyncio.sleep(interval)
 
     async def _current_vision(self):
         """对话用的视觉观测：优先感知循环最新帧（≤5s），否则现场拍一帧。

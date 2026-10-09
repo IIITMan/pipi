@@ -34,9 +34,9 @@ MODELS: dict[str, tuple[str, str, str]] = {
         "hf:BAAI/bge-small-zh-v1.5",
     ),
     "vision_det": (
-        "YuNet 人脸检测（ONNX，OpenCV 自带即可，通常无需下载）",
+        "YuNet 人脸检测（ONNX）—— 视觉检测主力，预下好运行时零下载",
         "≈ 0.3 MB",
-        "url:opencv_zoo/face_detection_yunet",
+        "url:https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx",
     ),
     "vision_expr": (
         "HSEmotion 表情识别（可选；装不上就用 ASR 情感标签替代）",
@@ -102,13 +102,53 @@ def download_one(key: str, spec: tuple[str, str, str]) -> bool:
 
     if how.startswith("pip:"):
         pkg = how.split(":", 1)[1]
-        return _run([sys.executable, "-m", "pip", "install", pkg], f"pip 安装 {pkg}")
+        ok = _run([sys.executable, "-m", "pip", "install", pkg], f"pip 安装 {pkg}")
+        if ok:
+            _warm(pkg)   # 首次运行时的模型下载提前到部署阶段
+        return ok
 
     if how.startswith("url:"):
-        print("    OpenCV 会在首次使用时自动下载，无需手动处理")
-        return True
+        url = how.split(":", 1)[1]
+        dest = MODELS_DIR / url.rsplit("/", 1)[-1].split("?")[0]
+        if dest.exists():
+            print(f"    已存在：{dest.name}")
+            return True
+        print(f"    下载 → {dest.name}")
+        try:
+            import urllib.request
+            urllib.request.urlretrieve(url, dest)
+            print(f"    完成（{dest.stat().st_size // 1024} KB）")
+            return True
+        except Exception as exc:
+            print(f"    ✗ 下载失败：{exc}")
+            return False
 
     return False
+
+
+def _warm(pkg: str) -> None:
+    """pip 装完后触发一次模型自下载（InsightFace/hsemotion 的模型在
+    首次推理时才拉取 —— 预热后运行时零下载、零卡顿）。"""
+    warmups = {
+        "insightface": (
+            "from insightface.app import FaceAnalysis;"
+            "import numpy as np;"
+            "a = FaceAnalysis(name='buffalo_sc', providers=['CPUExecutionProvider']);"
+            "a.prepare(ctx_id=-1, det_size=(640,640));"
+            "a.get(np.zeros((640,640,3), dtype=np.uint8))",
+            "预热 insightface（下载 buffalo_sc 检测/识别模型）",
+        ),
+        "hsemotion-onnx": (
+            "from hsemotion_onnx.facial_emotions import HSEmotionRecognizer;"
+            "import numpy as np;"
+            "m = HSEmotionRecognizer(model_name='enet_b0_8_best_afew');"
+            "m.predict_emotions(np.zeros((224,224,3), dtype=np.uint8), logits=False)",
+            "预热 hsemotion（下载表情识别模型）",
+        ),
+    }
+    if pkg in warmups:
+        code, desc = warmups[pkg]
+        _run([sys.executable, "-c", code], desc)
 
 
 def main() -> None:
