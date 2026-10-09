@@ -96,6 +96,9 @@ class PerceptionLoop:
                     if frame is not None:
                         obs = await asyncio.to_thread(
                             self.vision.process_frame, frame)
+                        # 原帧挂到观测上：云端视觉识别/监控推流复用（免二次抓拍）
+                        if obs is not None:
+                            obs.raw["_frame"] = frame
                 else:
                     obs = await self.vision.capture()
                 if obs is not None:

@@ -366,9 +366,21 @@ class ConversationOrchestrator:
                     ctx.tool_brief = "联网查到的资料（可用可不用）：" + brief
                     logger.info("搜索工具命中：%s", brief[:40])
             elif tool == "vision" and vision_obs is not None:
-                desc = await asyncio.wait_for(
-                    self._vlm_describe(vision_obs, query or user_text),
-                    timeout=6.0)
+                # 视觉识别偶尔超时/空响应：重试一次（共 ~12s 预算）
+                desc = None
+                for i in range(2):
+                    try:
+                        desc = await asyncio.wait_for(
+                            self._vlm_describe(vision_obs, query or user_text),
+                            timeout=6.0)
+                    except asyncio.TimeoutError:
+                        print("  👁 （视觉识别超时，重试…）" if i == 0 else
+                              "  👁 （视觉识别超时，先用眼睛凑合看）", flush=True)
+                        continue
+                    except Exception as exc:
+                        print(f"  👁 （视觉识别异常：{exc}）", flush=True)
+                    if desc:
+                        break
                 if desc:
                     vision_obs.raw["_vlm"] = desc
                     print(f"  👁 看到的是：{desc}", flush=True)
@@ -383,9 +395,13 @@ class ConversationOrchestrator:
 
     async def _vlm_describe(self, obs: VisionObservation,
                             question: str) -> str | None:
-        """云端多模态识别：把预编码的当前画面发给视觉模型换回描述。"""
+        """云端多模态识别：把预编码的当前画面发给视觉模型换回描述。
+
+        失败原因打印到控制台（便于排查：画面缺失/接口错误/空响应）。
+        """
         b64 = (obs.raw or {}).get("_jpeg")
         if not b64:
+            print("  👁 （识别失败：没有可用画面）", flush=True)
             return None
         llm = self.llm
         vlm_model = (self.cfg_snapshot or {}).get("vision", {}).get("vlm_model", "")
@@ -398,17 +414,25 @@ class ConversationOrchestrator:
                 timeout_s=getattr(llm, "timeout_s", 30))
         messages = [
             {"role": "system",
-             "content": "你是机器人皮皮的眼睛。用中文客观描述画面："
-                        "有几个人、衣着颜色、表情与姿态。不要寒暄，"
-                        "不超过 60 字。"},
+             "content": "你是机器人皮皮的眼睛。仔细观察画面，用中文描述："
+                        "有什么人/物品、衣着颜色、动作、表情，以及这个人在"
+                        "做什么、可能想干什么。100 字以内，不要寒暄。"},
             {"role": "user", "content": [
                 {"type": "text",
                  "text": question or "描述你现在看到的画面"},
                 {"type": "image_url", "image_url": {"url": b64}},
             ]},
         ]
-        resp = await llm.chat(messages, temperature=0.3, max_tokens=120)
-        return (getattr(resp, "text", "") or "").strip() or None
+        try:
+            resp = await llm.chat(messages, temperature=0.3, max_tokens=200)
+        except Exception as exc:
+            print(f"  👁 （视觉识别请求失败：{exc}）", flush=True)
+            return None
+        text = (getattr(resp, "text", "") or "").strip()
+        if not text:
+            print("  👁 （视觉模型返回空）", flush=True)
+            return None
+        return text
 
     def _prepare_context(self, user_id: str, user_text: str, *,
                          transcript: Any | None = None,
