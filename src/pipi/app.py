@@ -197,32 +197,12 @@ def _register_fallbacks(cfg: Config, sim: bool, router: CapabilityRouter) -> Non
     # 说明：本方案为**纯云端**，不注册本地模型档。
     # 云端两家（qwen / deepseek）互为灾备，全挂时由上面的 mock 用规则话术兜住。
 
-    # 视觉链上是 "full" / "detect_only"，需要显式注册这两个降级档位，
-    # 否则链走到底会找不到 provider（健康矩阵显示 ×）。
-    try:
+    # 视觉链 full/detect_only 档位的注册在 _build_optional_providers 的
+    # 视觉段完成（全流程只建一次 pipeline）；sim 模式在此注册纯 mock。
+    if sim:
         from pipi.providers.vision.mock import MockVision
-        from pipi.providers.vision.pipeline import VisionPipeline
-
-        if sim:
-            router.register("vision:full", MockVision(), available=True)
-            router.register("vision:detect_only", MockVision(), available=True)
-        else:
-            # 实机：先尝试建完整 pipeline；建不起来（无 cv2/无摄像头）就退到纯 mock
-            try:
-                from pipi.providers.vision import create_vision
-                full = create_vision(cfg)
-            except Exception:
-                full = None
-            # create_vision 缺依赖/无摄像头时会返回 MockVision ——
-            # 矩阵必须如实显示 ×，不能让 mock 冒充 full 档
-            full_is_real = (full is not None
-                            and type(full).__name__ != "MockVision")
-            router.register("vision:full", full or MockVision(),
-                            available=full_is_real)
-            router.register("vision:detect_only", full or MockVision(),
-                            available=full_is_real)
-    except Exception as exc:
-        logger.debug("视觉降级档位注册失败：%s", exc)
+        router.register("vision:full", MockVision(), available=True)
+        router.register("vision:detect_only", MockVision(), available=True)
 
     # ASR / TTS / Vision / Motion 的通用 mock 兜底（链末尾都写 "mock"）
     # 同名的 "mock" 会互相覆盖，所以一律用 "{cap}:mock" 注册，
@@ -296,16 +276,27 @@ def _build_optional_providers(cfg: Config, app_ctx: dict, sim: bool,
         except Exception as exc:
             logger.info("TTS 不可用（不影响文本模式）：%s", exc)
 
-    # ---- 视觉 ----
+    # ---- 视觉（链 full → detect_only → mock；全流程只建一次 pipeline，
+    #      两次 OpenCVCamera 探测会互相竞争摄像头句柄）----
     if cfg.get("vision.enabled", True) and not sim:
         try:
             from pipi.providers.vision import create_vision
-            vis = create_vision(cfg)
-            if vis and (not hasattr(vis, "is_available") or vis.is_available()):
-                app_ctx["vision"] = vis
-                router.register(f"vision:{vis.name}", vis, available=True)
+            full = create_vision(cfg)
         except Exception as exc:
-            logger.info("视觉不可用（不影响对话）：%s", exc)
+            logger.info("视觉 pipeline 创建失败：%s", exc)
+            full = None
+        # 缺依赖/无摄像头/摄像头被占时 create_vision 返回 MockVision ——
+        # 矩阵必须如实显示 ×，不能让 mock 冒充 full 档
+        full_is_real = (full is not None
+                        and type(full).__name__ != "MockVision")
+        if full is None:
+            from pipi.providers.vision.mock import MockVision
+            full = MockVision()
+        if not full_is_real:
+            logger.warning("视觉运行在 Mock 档（无摄像头/缺 opencv，或摄像头"
+                           "刚被释放未就绪）—— 重启可重试探测")
+        router.register("vision:full", full, available=full_is_real)
+        router.register("vision:detect_only", full, available=full_is_real)
 
     # ---- 运动 ----
     if cfg.get("motion.enabled", False):
@@ -452,6 +443,27 @@ def build_app(cfg: Config | None = None, *, sim: bool = False,
         owner_name=owner_name,
         growth=growth_engine,
     )
+
+    # 天气工具（免费 Open-Meteo，零成本；失败静默降级）
+    if cfg.get("weather.enabled", True):
+        from pipi.capabilities.weather import WeatherService
+
+        orchestrator.weather = WeatherService(
+            city=cfg.get("weather.city", "济南"))
+
+    # 通用联网搜索（Bing→Wikipedia 多源链，零 key；贾维斯化 ①）
+    if cfg.get("search.enabled", True):
+        from pipi.capabilities.search import SearchService
+
+        orchestrator.search = SearchService(
+            provider=cfg.get("search.provider", "auto"))
+
+    # 环境档案（贾维斯化③：家的持续认知，JSON 落盘）
+    if cfg.get("env.enabled", True):
+        from pipi.capabilities.environment import EnvironmentMemory
+
+        orchestrator.env = EnvironmentMemory(
+            data_dir=cfg.get("app.data_dir", "data"), cfg=cfg)
 
     # 提醒 / 闹铃 / 待办（阶段 F）
     reminder_service = None

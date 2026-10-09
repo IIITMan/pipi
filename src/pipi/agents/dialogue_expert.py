@@ -75,6 +75,11 @@ class DialogueExpert(BaseAgent):
                 "不要说教，可以陪他一起丧，或者就安静陪着。"
             )
 
+        # 工具查询结果（如实时天气）：LLM 把它当"皮皮刚查到的事实"来说
+        if ctx.tool_brief:
+            extra += (f"\n\n[工具结果] 这是你刚查到的实时信息，"
+                      f"基于它回答，用你的口吻：{ctx.tool_brief}")
+
         # 视觉提示
         messages = self.pb.build_messages(
             user_input=ctx.user_text,
@@ -85,6 +90,7 @@ class DialogueExpert(BaseAgent):
             emotion_state=ctx.emotion_state,
             vision=ctx.vision,
             has_vision=ctx.vision is not None,
+            inner_state=ctx.inner_brief,
             extra=extra,
         )
 

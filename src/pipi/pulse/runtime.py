@@ -78,6 +78,7 @@ class PulseRuntime:
                  vision: Any | None = None,
                  motion: Any | None = None,
                  weather: Any | None = None,
+                 env: Any | None = None,
                  loop: LivingLoop | None = None,
                  clock: Any = None,
                  mono: Any = None):
@@ -92,6 +93,11 @@ class PulseRuntime:
                                     .get("sync_interval_s", 1800.0))
         self._last_weather_kind: str | None = None
         self._weather_ext = ""        # 外面天气（中文），供快照/内心注入
+        # 环境档案（贾维斯化③）：观察事件顺带记录，永不阻塞生命循环
+        self.env = env
+        # 条件预警（贾维斯化②：回家汇报/陌生人久留，有料才开口）
+        from pipi.pulse.alerts import AlertEngine
+        self._alerts = AlertEngine((cfg or {}).get("alerts", {}) or {})
         self.clock = clock or _LocalClock()
         # 单调时钟（发声冷却/人声节流）：真实系统用 time.monotonic，
         # 仿真可注入（验证时按仿真时间推进，避免"永远在冷却"）
@@ -369,6 +375,11 @@ class PulseRuntime:
         self._weather_ext = zh
         text = self.loop.observe_weather(kind)
         self._event_log("weather", f"外面{zh}" + (f" · {text}" if text else ""))
+        if self.env is not None:
+            try:
+                self.env.observe_weather(kind, zh)
+            except Exception as exc:
+                logger.debug("环境档案天气记录失败（忽略）：%s", exc)
 
     # ------------------------------------------------------------------
     # 视觉感知注入（PerceptionLoop → inject）
@@ -379,6 +390,25 @@ class PulseRuntime:
         if kind is None:
             return
         text = self._inject(kind, {})
+        # 环境档案（贾维斯化③）：顺带记主人回家/离开/陌生人（永不阻塞）
+        if self.env is not None:
+            try:
+                self.env.observe_vision(event)
+            except Exception as exc:
+                logger.debug("环境档案视觉记录失败（忽略）：%s", exc)
+        # 条件预警（贾维斯化②）：回家汇报 / 陌生人久留
+        try:
+            if event.kind == "owner_arrived":
+                fb = self._alerts.home_report()
+                if fb:
+                    self._speak_alert("report_home", fb)
+            elif event.kind == "stranger":
+                self._alerts.on_stranger()
+                fb = self._alerts.stranger_alert()
+                if fb:
+                    self._speak_alert("stranger", fb)
+        except Exception as exc:
+            logger.debug("条件预警异常（不影响生命循环）：%s", exc)
         self._event_log(event.kind, f"{event.text} · {text}" if text
                         else event.text)
 
@@ -390,7 +420,27 @@ class PulseRuntime:
         """外部事件记入当天日记/生命流（不扰动动力学）。"""
         minute = self._now_minute()
         self.loop._note(kind, minute, text)
+        if kind == "reminder":
+            self._alerts.on_reminder_fired(text)   # 供回家汇报汇总
+            if self.env is not None:
+                try:
+                    self.env.observe_reminder(text)
+                except Exception as exc:
+                    logger.debug("环境档案提醒记录失败（忽略）：%s", exc)
         self._event_log(kind, text)
+
+    def _speak_alert(self, kind: str, fallback: str) -> None:
+        """条件预警开口：确定要说的（不走 vocal_prob），但受会话/睡眠抑制。"""
+        self._event_log(kind, fallback)      # 预警触发本身留痕（监控可见）
+        if self.session is None or getattr(self.session, "is_busy", False):
+            return
+        hour = self.clock.now_hour()
+        if self.loop.is_sleeping(hour):
+            return
+        try:
+            asyncio.create_task(self._render_and_speak(kind, fallback))
+        except RuntimeError:
+            self._speak_fallback(fallback)
 
     # ------------------------------------------------------------------
     # 聊天上报（cli 调用）
@@ -533,6 +583,13 @@ class PulseRuntime:
             return "你察觉到一点动静，好奇心上来了，想主动念叨一句"
         if kind == "attachment":
             return "主人就在旁边，你心里暖暖的，想主动撒个娇"
+        if kind == "report_home":
+            return ("主人刚回来。今天家里发生过几件事（定过提醒/有不认识的"
+                    "动静），你想自然地跟他汇报一句，像朋友报平安，"
+                    "语气符合你此刻的心情")
+        if kind == "stranger":
+            return ("今天家里附近似乎有不认识的人出现过好几次，你有点警觉，"
+                    "想提醒主人留意一下")
         from pipi.pulse.organs.will import REASON
         return f"你{REASON.get(kind, '有点想搭话')}，主动开口说一句"
 
@@ -633,6 +690,7 @@ class PulseRuntime:
                                    else ""),
                 "seed": prof,
             },
+            "env": (self.env.snapshot() if self.env is not None else None),
         }
 
     def _session_phase(self) -> str:

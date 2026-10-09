@@ -64,6 +64,7 @@ class LivingLoop:
                       "missed_return": 0, "early_reunion": 0,
                       "neglected": 0, "long_reunion": 0}
         self._prev_intent: str | None = None
+        self._intent = None            # 当前意图（改主意前持续成立，行为不闪回 idle）
 
         # P4：当天日记素材（入睡时成文 + 漂移种子）
         self._diary: list[dict] = []
@@ -193,6 +194,44 @@ class LivingLoop:
             return "翻了个身"
         return ""
 
+    # ------------------------------------------------------------- 外部天气
+    # 真实天气（WeatherService 类别）→ 心境：持续状态调制，幅度克制
+    # （±0.05 量级，远小于对话/重聚事件 ±0.1~0.3），且类别变化才触发，
+    # 不会把心情天天钉死在一种天气上。base 仍按 τ=15min 回归平静基线。
+    _WEATHER_BASE = {
+        "sunny": 0.02, "cloudy": 0.0, "overcast": -0.02,
+        "fog": -0.03, "rain": -0.04, "snow": 0.03, "thunder": -0.05,
+    }
+    _WEATHER_TEXT = {
+        "sunny": "外面阳光正好，心里也跟着亮堂堂的",
+        "cloudy": "外面多云，不晴不雨，挺平静的",
+        "overcast": "外面阴天，光线暗暗的，有点想窝着",
+        "fog": "外面起雾了，模模糊糊的，有点犯懒",
+        "rain": "外面在下雨，心里也跟着闷闷的，更想待在屋里",
+        "snow": "外面下雪了！好稀奇，有点想趴到窗边看",
+        "thunder": "外面在打雷，心里跟着一跳一跳的",
+    }
+
+    def observe_weather(self, kind: str) -> str:
+        """真实外部天气 → 心境（类别变化时由 runtime 调用）。
+
+        阴雨雾天：底色微沉 + 思念微涨（更想主人陪着）；
+        雷雨：额外一点波澜 + 安全感微降；雪：稀奇，底色微亮。
+        记入当天日记（生命流留痕），供入睡成文。
+        """
+        d = self._WEATHER_BASE.get(kind)
+        if d is None:
+            return ""
+        self.affect.push_base(d)
+        if kind == "thunder":
+            self.affect.push_pulse(0.12)
+            self.tension.push("security", -0.15)
+        if kind in ("rain", "fog", "overcast"):
+            self.tension.push("loneliness", 0.06)
+        text = self._WEATHER_TEXT.get(kind, "")
+        self._note("weather", (self.sim_seconds / MIN) % 1440.0, text)
+        return text
+
     def _do_startle(self) -> None:
         self._startle = True
         self._startle_t = self.sim_seconds
@@ -307,24 +346,26 @@ class LivingLoop:
             self._longing_peak_today = max(self._longing_peak_today, lg)
 
         # 行为尺度：Will 5s 判定（累加器，任意 dt 都按 5s 粒度不漏判）
-        intent = None
+        # 意图在"改主意"前持续成立：will.current 是唯一权威，
+        # decide 返回 None（未变）时保持，而非当作"没有意图"。
         self._since_will += dt
         while self._since_will >= 5.0:
             self._since_will -= 5.0
-            intent = self.will.decide(snap)
-            if intent is not None:
-                if intent.kind == "useless":
-                    if self.sim_seconds - self._last_useless >= \
-                            self.will.cfg["useless_cooldown_s"]:
-                        self._last_useless = self.sim_seconds
-                        self.stats["useless"] += 1
-                    else:
-                        intent = None   # 冷却中：不重复做无用的事
-                elif intent.kind != "abandoned":
-                    if self._prev_intent is not None \
-                            and self._prev_intent != intent.kind:
-                        self.stats["intent_changes"] += 1
-                    self._prev_intent = intent.kind
+            new = self.will.decide(snap)
+            if new is not None and new.kind == "useless":
+                if self.sim_seconds - self._last_useless >= \
+                        self.will.cfg["useless_cooldown_s"]:
+                    self._last_useless = self.sim_seconds
+                    self.stats["useless"] += 1
+                else:
+                    self.will.current = None   # 冷却中：不做无用的事，回 idle
+            if new is not None and new.kind != "abandoned":
+                if self._prev_intent is not None \
+                        and self._prev_intent != new.kind:
+                    self.stats["intent_changes"] += 1
+                self._prev_intent = new.kind
+        intent = self.will.current
+        self._intent = intent
 
         body = self.body.express(breath, snap, weather, intent,
                                  startle=self._startle)

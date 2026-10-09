@@ -19,6 +19,7 @@ import sys
 from typing import Any
 
 from pipi.app import App, build_app
+from pipi.domain.dialogue import Role
 from pipi.infra import Config
 
 logger = logging.getLogger(__name__)
@@ -177,6 +178,10 @@ class CLI:
             cfg=self.app.cfg, verbose=self.verbose,
             on_identify=self._identify_speaker,
         )
+        # 自发发声（自言自语/预警/提醒）也写入对话历史：
+        # 否则下一轮 LLM 看不到皮皮自己刚说过的话，会"失忆"。
+        # 带去重：handle_proactive 已记过同一句时跳过。
+        self._session.history_sink = self._record_spontaneous
         self._vp = getattr(self.app, "voiceprint", None)
         self._last_uid = ""
         if self._vp is not None:
@@ -486,6 +491,25 @@ class CLI:
             self._chat_lock = asyncio.Lock()
         async with self._chat_lock:
             await self._respond_stream_locked(text)
+
+    def _record_spontaneous(self, text: str) -> None:
+        """自发发声 → 写入对话历史（去重：最后一条 assistant 相同则跳过）。
+
+        让 LLM 在下一轮能看到皮皮自己刚说过的话（修复"刚才说有怪声，
+        转脸又说没怪事"的失忆）。
+        """
+        if not text:
+            return
+        try:
+            uid = self._active_uid or "owner"
+            sess = self.orch.get_session(uid)
+            last = sess.context_messages(1)
+            if last and last[0]["role"] == "assistant" \
+                    and last[0]["content"] == text:
+                return
+            sess.add(Role.ASSISTANT, text)
+        except Exception as exc:
+            logger.debug("自发发声记历史失败（忽略）：%s", exc)
 
     def _identify_speaker(self, audio) -> str | None:
         """声纹识别回调：登记主人 / 区分陌生人。"""

@@ -25,6 +25,8 @@ class AgentContext:
     profile: UserProfile | None = None
     emotion_state: EmotionState | None = None
     persona: PersonaSpec | None = None
+    inner_brief: str = ""        # PULSE 此刻真实内心状态（注入对话，消除两张皮）
+    tool_brief: str = ""         # 工具查询结果（如天气），注入 system 供 LLM 用人格口吻作答
 
     # 感知
     transcript: Transcript | None = None

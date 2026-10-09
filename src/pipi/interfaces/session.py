@@ -282,6 +282,7 @@ class InteractionSession:
         self.current_user_id = ""   # 当前说话人（由 on_identify 更新）
 
         self.wake_words = tuple(cfg.get("audio.mic.wake_words", ["皮皮"]))
+        self.history_sink = None    # 可注入：自发发声也写入对话历史（cli 绑定）
         self.timeout_s = cfg.get("audio.mic.session.timeout_s", 10)
         self.barge_in = cfg.get("audio.mic.session.barge_in", True)
         self.barge_min_ms = cfg.get("audio.mic.session.barge_in_min_ms", 200)
@@ -409,6 +410,12 @@ class InteractionSession:
         self._notify("  已回待机（再喊唤醒词继续）")
 
     async def _speak_spontaneous(self, text: str) -> None:
+        # 自发言语也进对话历史（否则下一轮 LLM 看不到自己说过的话）
+        if self.history_sink is not None:
+            try:
+                self.history_sink(text)
+            except Exception:
+                pass
         await self._speak_line(text, prefix="皮皮（自言自语）> ")
 
     async def _speak_line(self, text: str, prefix: str = "皮皮 > ") -> None:

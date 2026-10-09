@@ -34,6 +34,7 @@ class PromptBuilder:
         emotion_state: EmotionState | None = None,
         vision: VisionObservation | None = None,
         has_vision: bool = False,
+        inner_state: str = "",
         extra: str = "",
     ) -> str:
         """生成完整的 System Prompt。"""
@@ -74,6 +75,7 @@ class PromptBuilder:
             emotion_state=emotion_state.to_prompt_line() if emotion_state else "",
             vision_hint=vision_hint,
             vision_capability=vision_capability,
+            inner_state=inner_state,
         ) + (f"\n\n{extra}" if extra else "")
 
     def _persona_extra(self) -> str:

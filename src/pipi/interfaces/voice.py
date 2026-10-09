@@ -43,7 +43,7 @@ class VoiceLoop:
         self,
         asr: Any,
         capture: MicCapture,
-        wake_words: tuple[str, ...] = ("皮皮", "pipi", "小皮"),
+        wake_words: tuple[str, ...] = ("皮皮", "pipi"),
         tts: Any | None = None,
         on_query: Callable[[str], Awaitable[None]] | None = None,
         on_state: Callable[[str, str], None] | None = None,

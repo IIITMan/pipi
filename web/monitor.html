@@ -66,6 +66,9 @@
   /* ---- 心搏 / 成长 / 提醒 ---- */
   #pulseCard,#growthCard,#remindersCard{border-top:1px solid var(--line);padding-top:8px;margin-top:8px}
   .pl{font-size:12px;line-height:1.9}
+  .cap{display:inline-block;margin-right:8px;font-size:12px}
+  .cap.on{color:var(--green)}
+  .cap.off{color:var(--dim)}
   #pSeed{font-size:11px;color:var(--dim)}
   #growthStage{font-size:12.5px;margin-bottom:3px}
   #growthGap{font-size:12px;color:var(--dim)}
@@ -198,6 +201,7 @@
         <h2 style="margin-bottom:4px">🫀 心搏（PULSE）</h2>
         <div class="pl">
           <div>呼吸 <span id="pBreath">-</span> · 天气 <span id="pWeather">-</span>
+              · 外面 <span id="pExtWeather" style="color:var(--dim)">—</span>
               <span id="pOwner" style="color:var(--dim)"></span></div>
           <div>对话心情 <span id="pChatMood" style="color:var(--dim)">—</span>
               <span id="pPhase" style="color:var(--dim)"></span></div>
@@ -219,6 +223,14 @@
         <h2 style="margin-bottom:4px">⏰ 提醒 / 待办</h2>
         <div id="remindersList"></div>
         <div id="remindersNext"></div>
+      </div>
+      <div id="envCard" style="display:none">
+        <h2 style="margin-bottom:4px">🏠 环境档案 <span style="color:var(--dim)">（贾维斯感③：它眼里的家）</span></h2>
+        <div class="pl">
+          <div id="envOwner" style="color:var(--green)"></div>
+          <div id="envFacts" style="color:var(--dim);margin-top:3px"></div>
+          <div id="envCaps" style="margin-top:5px"></div>
+        </div>
       </div>
     </div>
   </div>
@@ -313,6 +325,7 @@ function renderStats(p){
 function applySnapshot(s){
   renderStats(s.physio); renderFace(s); renderActivity(s.activity);
   renderGrowth(s.growth); renderReminders(s.reminders); renderPulse(s.pulse);
+  renderEnv(s.env);
   $("queue").textContent = s.queue;
   $("backend").textContent = zh(BACKEND_ZH, s.action_backend);
   $("lastThought").textContent = s.last_thought ? "最近念头：" + s.last_thought : "";
@@ -325,6 +338,7 @@ function renderPulse(p){
   card.style.display = "";
   $("pBreath").textContent = `${p.breath.rate.toFixed(0)} 次/分 · 深度 ${p.breath.depth.toFixed(2)}`;
   $("pWeather").textContent = `${p.weather.label}${p.sleeping ? "（睡着了）" : ""}`;
+  $("pExtWeather").textContent = p.weather_ext ? p.weather_ext : "—";
   $("pOwner").textContent = p.owner_present ? "· 主人在" : "· 主人不在";
   const moodSign = {"开心":1,"得意":1,"调皮":1,"关心":1,"平静":0,"困倦":-1,
     "傲娇":0,"吃醋":-1,"委屈":-1,"生气":-1}[p.last_chat_mood];
@@ -386,6 +400,32 @@ function renderReminders(r){
   $("remindersNext").textContent = r.next_due
     ? "下次触发：" + new Date(r.next_due*1000).toLocaleString("zh",{hour:"2-digit",minute:"2-digit"})
     : "";
+}
+
+/* ================= 环境档案（贾维斯化③，HUD ④） ================= */
+function renderEnv(e){
+  const card = $("envCard");
+  if (!e){ card.style.display = "none"; return; }
+  card.style.display = "";
+  $("envOwner").innerHTML =
+    (e.owner_present ? "🏠 主人在家" : "🌙 主人不在")
+    + (e.owner_home_hour != null ? ` · 一般 ${e.owner_home_hour} 点回来` : "")
+    + (e.owner_arrivals_today ? ` · 今日回家 ${e.owner_arrivals_today} 次` : "")
+    + (e.stranger_today ? ` · 今天陌生人 ${e.stranger_today} 次` : "");
+  const rows = [];
+  if (e.places && e.places.length) rows.push("📍 " + e.places.join("、"));
+  if (e.items && e.items.length) rows.push("🎁 " + e.items.join("、"));
+  if (e.people && e.people.length) rows.push("👪 " + e.people.join("、"));
+  if (e.weather && e.weather.zh) rows.push("🌦 " + e.weather.zh);
+  if (e.reminders && e.reminders.length)
+    rows.push("📌 " + e.reminders.map(r=>r.text).join("、"));
+  $("envFacts").textContent =
+    rows.join(" · ") || "还在慢慢认识这个家……（聊一聊家里的人和东西，它就会记住）";
+  const cap = (k, l) =>
+    `<span class="cap ${e.online && e.online[k] ? "on" : "off"}">`
+    + `${e.online && e.online[k] ? "●" : "○"} ${l}</span>`;
+  $("envCaps").innerHTML = cap("search", "搜索") + cap("alerts", "预警")
+    + cap("weather", "天气");
 }
 
 /* ================= 两只大眼睛：纯色大圆眼，形状即状态 ================= */
@@ -465,7 +505,8 @@ function renderActivity(a){
 /* ================= 日志 / 聊天 ================= */
 const KINDS = {thought:"💭", vocal:"🗣️", muted:"🤫", inner:"🧠", discard:"🗑️",
   cooldown:"⏳", fatigue_mute:"😴", action:"🤖", user_voice:"👂",
-  barge_in:"✋", response_done:"✔️", farewell:"👋", whimper:"🐾"};
+  barge_in:"✋", response_done:"✔️", farewell:"👋", whimper:"🐾",
+  report_home:"🔔", stranger:"⚠️", weather:"🌦️", reminder:"📌"};
 function renderLog(){
   $("life").innerHTML = logBuf.slice(-40).reverse().map(e=>{
     const t = new Date(e.t*1000).toLocaleTimeString("zh",{hour12:false});

@@ -25,14 +25,21 @@ class OpenCVCamera:
             import cv2
         except ImportError:
             return False
-        try:
-            # Windows 上 MSMF 后端经常报 0xC00D3704（grab 失败），DSHOW 稳定
-            cap = cv2.VideoCapture(self.index, cv2.CAP_DSHOW)
-            ok = cap.isOpened()
-            cap.release()
-            return ok
-        except Exception:
-            return False
+        # Windows 摄像头句柄释放有延迟（前一个进程刚退出/重启竞争），
+        # 探测失败时重试几次再下结论
+        import time
+        for attempt in range(3):
+            try:
+                # MSMF 后端经常报 0xC00D3704（grab 失败），DSHOW 稳定
+                cap = cv2.VideoCapture(self.index, cv2.CAP_DSHOW)
+                ok = cap.isOpened()
+                cap.release()
+                if ok:
+                    return True
+            except Exception:
+                pass
+            time.sleep(0.8 * (attempt + 1))
+        return False
 
     async def open(self) -> None:
         import cv2
