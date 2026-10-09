@@ -335,6 +335,14 @@ class ConversationOrchestrator:
                         user_text: str, on_notice) -> None:
         """执行 LLM 请求的工具，结果注入 ctx.tool_brief / vision.raw。"""
         tool, query = sig.tool, sig.query
+        intent_cn = {"weather": "想查天气", "search": "想查资料",
+                     "vision": "想看看眼前"}[tool]
+        try:
+            print(f"  💭 意图：{intent_cn}"
+                  f"（{query[:30]}）" if query else f"  💭 意图：{intent_cn}",
+                  flush=True)
+        except Exception:
+            pass
         notice = {"weather": "等等哈，我看看天气……",
                   "search": "等等哈，我查查……",
                   "vision": "稍等，我看看……"}.get(tool)
@@ -363,7 +371,7 @@ class ConversationOrchestrator:
                     timeout=6.0)
                 if desc:
                     vision_obs.raw["_vlm"] = desc
-                    logger.info("云端视觉描述：%s", desc[:40])
+                    print(f"  👁 看到的是：{desc}", flush=True)
         except asyncio.TimeoutError:
             logger.info("工具 %s 超时（6s）—— 第二轮将直接以已有知识回答", tool)
         except Exception as exc:

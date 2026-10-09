@@ -156,7 +156,8 @@ audio:
       # sherpa-onnx SenseVoice int8（无 torch/funasr，内存 ~300MB）
       sherpa_model_dir: "data/models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17"
       num_threads: 2
-      use_itn: true            # 逆文本正则化（数字/标点）
+      use_itn: false           # 逆文本正则化：关（会把"十"错转成"1"，
+                               #  对话场景中文数字更自然；要阿拉伯数字再开）
       language: "auto"
     cloud_dashscope:
       api_key: ""

@@ -507,6 +507,16 @@ class CLI:
         state = {"printed": False, "ttfb_ms": 0}
         obs = await self._vision_for_turn(text)
 
+        # 内心活动可视化：此刻的想法（PULSE 念头/活动，低频变化才值得看）
+        thought = ""
+        if self._life is not None:
+            thought = getattr(self._life, "_last_thought_desc", "") or ""
+        if thought:
+            try:
+                print(f"  💭 内心：{thought}", flush=True)
+            except Exception:
+                pass
+
         async def on_chunk(delta: str) -> None:
             if not state["printed"]:
                 state["ttfb_ms"] = int((_time.perf_counter() - t0) * 1000)
