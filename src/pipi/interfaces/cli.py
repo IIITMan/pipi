@@ -406,8 +406,10 @@ class CLI:
         except Exception:
             return None
 
-    _VLM_HINT_WORDS = ("看见", "看到", "穿", "颜色", "表情", "长什么样",
-                       "什么样", "认得", "认出", "看起来", "几", "谁")
+    # 云端视觉触发词（收紧：只有真的在问画面内容才传图，
+    # "星期几/几点"这类皮皮自己能答的问题不触发）
+    _VLM_HINT_WORDS = ("看见", "看到", "我穿", "衣服", "表情",
+                       "长什么样", "长啥样", "认出", "认得")
 
     def _looks_visual(self, text: str) -> bool:
         return any(k in text for k in self._VLM_HINT_WORDS)
