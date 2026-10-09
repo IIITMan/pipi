@@ -417,20 +417,33 @@ class CLI:
         """对话用观测：本地检测 + 画面预编码（云端视觉理解由意图路由触发，
         orchestrator._vlm_describe 使用 raw['_jpeg']）。"""
         obs = await self._current_vision()
+        if obs is not None:
+            # 本地视觉识别结果上控制台（人脸数/在场判定/能看到的提示）
+            try:
+                hint = obs.to_hint("主人") or ""
+                print(f"  👁 本地视觉：人脸×{obs.person_count} · "
+                      f"{'主人在屋' if obs.owner_present else '主人不在'}"
+                      + (f" · {hint}" if hint else ""), flush=True)
+            except Exception:
+                pass
         if obs is not None and not obs.raw.get("_jpeg"):
             try:
                 import base64
 
                 import cv2
                 frame = obs.raw.get("_frame")
-                if frame is not None:
+                if frame is None:
+                    print("  👁 （编码跳过：观测未携带原帧）", flush=True)
+                else:
                     ok, buf = cv2.imencode(
                         ".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
                     if ok:
                         obs.raw["_jpeg"] = ("data:image/jpeg;base64,"
                                             + base64.b64encode(buf).decode())
-            except Exception:
-                pass
+                    else:
+                        print("  👁 （编码失败：imencode 返回 False）", flush=True)
+            except Exception as exc:
+                print(f"  👁 （编码异常：{exc}）", flush=True)
         return obs
 
     async def _respond_stream(self, text: str) -> None:

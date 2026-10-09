@@ -386,6 +386,13 @@ class PulseRuntime:
     # ------------------------------------------------------------------
 
     def observe_vision(self, event: Any) -> None:
+        # 感知事件可视化（事件本身带去抖/冷却，低频，直接上控制台）
+        try:
+            desc = getattr(event, "desc", "") or ""
+            if desc:
+                print(f"  👁 感知：{desc}", flush=True)
+        except Exception:
+            pass
         kind = _VISION_MAP.get(event.kind)
         if kind is None:
             return
