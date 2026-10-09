@@ -32,6 +32,7 @@ _KEYS = (
     "为何", "怎么回事", "是什么意思", "是干什么", "在哪", "有哪些",
     "怎么弄", "怎么办", "好不好", "能不能", "会不会", "为什么",
     "多高", "多远", "多深", "多重", "多长", "多大", "多快", "多早",
+    "多久", "哪年", "哪一年", "哪天",
 )
 # 明确排除：提醒/天气/时间意图（对应工具或皮皮的时钟自己能答，
 # 无需联网搜索 —— 否则"星期几/几点"也要拉维基百科，白等好几秒）
@@ -97,6 +98,20 @@ class SearchService:
     def detect(self, text: str) -> bool:
         """是否事实类疑问意图（orchestrator 在拉搜索结果前先调用）。"""
         return detect(text)
+
+    async def smart_fetch(self, text: str, gate=None) -> str | None:
+        """关键词命中后的二次确认 + 联网搜索。
+
+        gate：异步分类器（便宜模型判断是否真需要联网），用于过滤
+        '星期几/几点了'这类皮皮自己能答的问题。gate 失败 → 保守照搜。
+        """
+        if gate is not None:
+            try:
+                if not await gate(text):
+                    return None
+            except Exception:
+                pass
+        return await self.fetch(text)
 
     # ------------------------------------------------------------------
 

@@ -94,6 +94,8 @@ class ConversationOrchestrator:
         enable_proactive_emotion: bool = True,
         growth: Any | None = None,
         reminders: Any | None = None,
+        inner_state_provider: Callable[[], str] | None = None,
+        weather: Any | None = None,
     ):
         self.llm = llm
         self.persona = persona
@@ -112,6 +114,11 @@ class ConversationOrchestrator:
         self.enable_proactive_emotion = enable_proactive_emotion
         self.growth = growth   # GrowthEngine（可成长性，可为 None）
         self.reminders = reminders   # ReminderService（提醒/闹铃/待办，可为 None）
+        # PULSE 内心状态提供者（每轮拉取注入对话；legacy/无 PULSE 时为 None）
+        self.inner_state_provider = inner_state_provider
+        self.weather = weather   # 天气工具（可为 None，不启用）
+        self.search = None       # 通用搜索工具（app 装配，可为 None）
+        self.env = None          # 环境档案（贾维斯化③，app 装配，可为 None）
 
         # 会话缓存
         self._sessions: dict[str, Session] = {}
@@ -174,11 +181,46 @@ class ConversationOrchestrator:
         start, now, ctx, session, profile = self._prepare_context(
             user_id, user_text, transcript=transcript, vision=vision)
 
-        # ---- 并行：情感分析 + 记忆检索 ----
+        # 环境档案（贾维斯化③）：顺带记下提到的地点/物品/家人（永不阻塞）
+        if self.env is not None:
+            try:
+                self.env.observe_chat(user_text)
+            except Exception as exc:
+                logger.debug("环境档案记录失败（忽略）：%s", exc)
+
+        # ---- 并行：情感分析 + 记忆检索 + 天气/搜索查询 ----
         emo_task = asyncio.create_task(self.emotion_analyst.run(ctx))
         mem_task = asyncio.create_task(self.memory_expert.run(ctx))
+        wx_task: asyncio.Task | None = None
+        sr_task: asyncio.Task | None = None
+        if self.weather is not None and self.weather.detect(user_text):
+            wx_task = asyncio.create_task(self.weather.fetch())
+        elif self.search is not None and self.search.detect(user_text):
+            # 关键词命中 → 便宜模型二次确认是否真需联网（与情感/记忆
+            # 并行跑，不增首响；'星期几/几点'这类被过滤，不再拉维基）
+            sr_task = asyncio.create_task(
+                self.search.smart_fetch(user_text, gate=self._search_gate))
         emo_res, mem_res = await asyncio.gather(emo_task, mem_task,
                                                 return_exceptions=True)
+        briefs: list[str] = []
+        if wx_task is not None:
+            try:
+                brief = await wx_task
+                if brief:
+                    briefs.append(brief)
+                    logger.info("天气工具命中：%s", brief)
+            except Exception as exc:
+                logger.warning("天气查询异常（忽略）：%s", exc)
+        if sr_task is not None:
+            try:
+                brief = await sr_task
+                if brief:
+                    briefs.append("联网查到的资料（可用可不用）：" + brief)
+                    logger.info("搜索工具命中：%s", brief[:40])
+            except Exception as exc:
+                logger.warning("搜索查询异常（忽略）：%s", exc)
+        if briefs:
+            ctx.tool_brief = "\n".join(briefs)
         if isinstance(emo_res, Exception):
             logger.warning("情感分析 Agent 失败：%s", emo_res)
         if isinstance(mem_res, Exception):
@@ -238,11 +280,44 @@ class ConversationOrchestrator:
         start, now, ctx, session, profile = self._prepare_context(
             user_id, user_text, transcript=transcript, vision=vision)
 
-        # ---- 并行：情感分析 + 记忆检索 ----
+        # 环境档案（贾维斯化③）：顺带记下提到的地点/物品/家人（永不阻塞）
+        if self.env is not None:
+            try:
+                self.env.observe_chat(user_text)
+            except Exception as exc:
+                logger.debug("环境档案记录失败（忽略）：%s", exc)
+
+        # ---- 并行：情感分析 + 记忆检索 + 天气/搜索查询 ----
         emo_task = asyncio.create_task(self.emotion_analyst.run(ctx))
         mem_task = asyncio.create_task(self.memory_expert.run(ctx))
+        wx_task: asyncio.Task | None = None
+        sr_task: asyncio.Task | None = None
+        if self.weather is not None and self.weather.detect(user_text):
+            wx_task = asyncio.create_task(self.weather.fetch())
+        elif self.search is not None and self.search.detect(user_text):
+            # 关键词命中 → 便宜模型二次确认是否真需联网（与情感/记忆
+            # 并行跑，不增首响；'星期几/几点'这类被过滤，不再拉维基）
+            sr_task = asyncio.create_task(
+                self.search.smart_fetch(user_text, gate=self._search_gate))
         emo_res, mem_res = await asyncio.gather(emo_task, mem_task,
                                                 return_exceptions=True)
+        briefs: list[str] = []
+        if wx_task is not None:
+            try:
+                brief = await wx_task
+                if brief:
+                    briefs.append(brief)
+            except Exception as exc:
+                logger.warning("天气查询异常（忽略）：%s", exc)
+        if sr_task is not None:
+            try:
+                brief = await sr_task
+                if brief:
+                    briefs.append("联网查到的资料（可用可不用）：" + brief)
+            except Exception as exc:
+                logger.warning("搜索查询异常（忽略）：%s", exc)
+        if briefs:
+            ctx.tool_brief = "\n".join(briefs)
         if isinstance(emo_res, Exception):
             logger.warning("情感分析 Agent 失败：%s", emo_res)
         if isinstance(mem_res, Exception):
@@ -278,6 +353,28 @@ class ConversationOrchestrator:
     # 内部：回合准备 / 收尾
     # ------------------------------------------------------------------
 
+    async def _search_gate(self, text: str) -> bool:
+        """便宜模型确认是否真的需要联网搜索（关键词命中的二次过滤）。
+
+        皮皮自己能答的不搜：当前时间/日期、闲聊寒暄、情感表达、关于
+        皮皮自己的问题。分类失败 → 返回 True（保守照搜，宁多勿漏）。
+        """
+        try:
+            messages = [
+                {"role": "system",
+                 "content": "判断用户消息是否需要联网搜索外部/百科信息才能回答。"
+                            "皮皮自己知道的：当前时间与日期、闲聊寒暄、情感"
+                            "表达、关于皮皮自己的一切。只输出 JSON，不要解释："
+                            '{"need": true} 或 {"need": false}'},
+                {"role": "user", "content": text},
+            ]
+            resp = await self.llm.chat(messages, temperature=0.1,
+                                       max_tokens=20, use_cheap=True)
+            txt = (getattr(resp, "text", "") or "").replace(" ", "").lower()
+            return '"need":true' in txt
+        except Exception:
+            return True
+
     def _prepare_context(self, user_id: str, user_text: str, *,
                          transcript: Any | None = None,
                          vision: VisionObservation | None = None):
@@ -301,6 +398,14 @@ class ConversationOrchestrator:
             elif hours >= 0.5:
                 state.apply_by_key("casual_warmth")
 
+        # PULSE 此刻真实内心状态（无 provider 时为空，兼容 legacy）
+        inner = ""
+        if self.inner_state_provider is not None:
+            try:
+                inner = self.inner_state_provider() or ""
+            except Exception as exc:
+                logger.debug("内心状态获取失败：%s", exc)
+
         ctx = AgentContext(
             user_id=user_id,
             user_text=user_text,
@@ -308,6 +413,7 @@ class ConversationOrchestrator:
             profile=profile,
             emotion_state=state,
             persona=self.persona,
+            inner_brief=inner,
             transcript=transcript,
             vision=vision,
             history=session.context_messages(),
@@ -460,6 +566,13 @@ class ConversationOrchestrator:
             vision=vision, trace_id=session.trace_id,
         )
 
+        # 主动搭话也读此刻内心（统一说话：语气与内心一致）
+        inner = ""
+        if self.inner_state_provider is not None:
+            try:
+                inner = self.inner_state_provider() or ""
+            except Exception:
+                inner = ""
         messages = self.dialogue_expert.pb.build_proactive(
             event=event,
             current_time=time.strftime("%Y-%m-%d %H:%M", time.localtime(now)),
@@ -468,6 +581,7 @@ class ConversationOrchestrator:
             emotion_state=state,
             vision=vision,
             has_vision=vision is not None,
+            inner_state=inner,
         )
 
         try:
