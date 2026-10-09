@@ -88,7 +88,16 @@ class PerceptionLoop:
         interval = 1.0 / max(self.fps, 0.1)
         while self._running:
             try:
-                obs = await self.vision.capture()
+                # 重推理（InsightFace/hsemotion，首次还有模型下载）丢进线程池，
+                # 不阻塞事件循环 —— 否则麦克风帧泵堆积、TTS/对话全部卡顿
+                if hasattr(self.vision, "camera"):
+                    frame = await self.vision.camera.read()
+                    obs = None
+                    if frame is not None:
+                        obs = await asyncio.to_thread(
+                            self.vision.process_frame, frame)
+                else:
+                    obs = await self.vision.capture()
                 if obs is not None:
                     self.latest = obs
                     self.owner_present = obs.owner_present

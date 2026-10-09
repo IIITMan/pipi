@@ -358,6 +358,12 @@ class CLI:
         if latest is not None and _time.time() - latest.timestamp < 5.0:
             return latest
         try:
+            # 感知循环未跑（文本模式）时现场拍一帧；推理丢线程池防阻塞
+            if hasattr(vision, "camera"):
+                frame = await vision.camera.read()
+                if frame is None:
+                    return None
+                return await asyncio.to_thread(vision.process_frame, frame)
             return await vision.capture()
         except Exception:
             return None

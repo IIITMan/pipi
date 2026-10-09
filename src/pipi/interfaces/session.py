@@ -446,10 +446,19 @@ class InteractionSession:
             while len(acc) >= FRAME:
                 out = acc[:FRAME, 0].copy()   # (512,1) → 一维 (512,)
                 acc = acc[FRAME:]
+
+                def _put_frame(out=out):
+                    # put_nowait 在事件循环线程里执行 —— QueueFull 必须在这里
+                    # 接住，否则 asyncio 兜底把 ERROR 刷屏（忙时丢帧，宁缺毋滥）
+                    try:
+                        self._aq.put_nowait(out)
+                    except asyncio.QueueFull:
+                        pass
+
                 try:
-                    self._loop.call_soon_threadsafe(self._aq.put_nowait, out)
-                except (asyncio.QueueFull, RuntimeError):
-                    pass  # 忙时丢帧，宁缺毋滥
+                    self._loop.call_soon_threadsafe(_put_frame)
+                except RuntimeError:
+                    pass  # 循环已关闭
 
         self._notify(f"  待机中…（喊「{'/'.join(self.wake_words)}」唤醒）")
         with sd.InputStream(samplerate=self.capture.sample_rate, channels=1,
