@@ -33,7 +33,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from pipi.agents.base import AgentContext
-from pipi.agents.dialogue_expert import DialogueExpert
+from pipi.agents.dialogue_expert import DialogueExpert, ToolCallSignal
 from pipi.agents.emotion_analyst import EmotionAnalyst
 from pipi.agents.memory_expert import MemoryExpert
 from pipi.capabilities.expression import PostProcessResult, postprocess, to_bubbles
@@ -202,90 +202,31 @@ class ConversationOrchestrator:
             except Exception as exc:
                 logger.debug("环境档案记录失败（忽略）：%s", exc)
 
-        # ---- 并行：情感分析 + 记忆检索 + 意图路由 ----
+        # ---- 并行：情感分析 + 记忆检索 ----
         emo_task = asyncio.create_task(self.emotion_analyst.run(ctx))
         mem_task = asyncio.create_task(self.memory_expert.run(ctx))
-        route_task = asyncio.create_task(self._route_intent(user_text))
-        emo_res, mem_res, route = await asyncio.gather(
-            emo_task, mem_task, route_task, return_exceptions=True)
-        tool = (route or {}).get("tool", "none") \
-            if isinstance(route, dict) else "none"
-        query = (route or {}).get("query", "") if isinstance(route, dict) else ""
-        logger.info("意图路由：%s（%s）", tool, query[:30])
-
-        # 路由命中工具 → 先应一声（on_notice 异步播报，不阻塞查询）
-        if tool != "none" and on_notice is not None:
-            notice = {"weather": "等等哈，我看看天气……",
-                      "search": "等等哈，我查查……",
-                      "vision": "稍等，我看看……"}.get(tool)
-            if notice:
-                try:
-                    r = on_notice(notice)
-                    if asyncio.iscoroutine(r):
-                        asyncio.ensure_future(r)
-                except Exception:
-                    pass
-
-        wx_task: asyncio.Task | None = None
-        sr_task: asyncio.Task | None = None
-        vlm_task: asyncio.Task | None = None
-        if tool == "weather" and self.weather is not None:
-            wx_task = asyncio.create_task(self.weather.fetch())
-        elif tool == "search" and self.search is not None:
-            sr_task = asyncio.create_task(self.search.fetch(query or user_text))
-        elif tool == "vision" and vision is not None:
-            vlm_task = asyncio.create_task(self._vlm_describe(vision, query))
-
-        briefs: list[str] = []
-        # 工具查询限时：超时放弃注入、直答 —— 搜索链最坏可拖 16s，
-        # 不能让它卡住首响
-        TOOL_TIMEOUT = 6.0
-        if wx_task is not None:
-            try:
-                brief = await asyncio.wait_for(wx_task, timeout=TOOL_TIMEOUT)
-                if brief:
-                    briefs.append(brief)
-                    logger.info("天气工具命中：%s", brief)
-            except asyncio.TimeoutError:
-                logger.info("天气查询超时（%.0fs），放弃注入直答", TOOL_TIMEOUT)
-            except Exception as exc:
-                logger.warning("天气查询异常（忽略）：%s", exc)
-        if sr_task is not None:
-            try:
-                brief = await asyncio.wait_for(sr_task, timeout=TOOL_TIMEOUT)
-                if brief:
-                    briefs.append("联网查到的资料（可用可不用）：" + brief)
-                    logger.info("搜索工具命中：%s", brief[:40])
-            except asyncio.TimeoutError:
-                logger.info("搜索超时（%.0fs），放弃注入直答", TOOL_TIMEOUT)
-            except Exception as exc:
-                logger.warning("搜索查询异常（忽略）：%s", exc)
-        if vlm_task is not None and vision is not None:
-            try:
-                desc = await asyncio.wait_for(vlm_task, timeout=TOOL_TIMEOUT)
-                if desc:
-                    vision.raw["_vlm"] = desc
-                    logger.info("云端视觉描述：%s", desc[:40])
-            except asyncio.TimeoutError:
-                logger.info("云端视觉超时（%.0fs），无视觉提示直答", TOOL_TIMEOUT)
-            except Exception as exc:
-                logger.warning("云端视觉异常（忽略）：%s", exc)
-        if briefs:
-            ctx.tool_brief = "\n".join(briefs)
+        emo_res, mem_res = await asyncio.gather(emo_task, mem_task,
+                                                return_exceptions=True)
         if isinstance(emo_res, Exception):
             logger.warning("情感分析 Agent 失败：%s", emo_res)
         if isinstance(mem_res, Exception):
             logger.warning("记忆检索 Agent 失败：%s", mem_res)
 
-        # ---- 生成回复 ----
-        gen_res = await self.dialogue_expert.run(ctx)
+        # ---- 生成（工具标记 → 执行工具 → 携带结果重生成，最多 2 轮）----
+        raw_text = ""
         degraded = False
-        if not gen_res.ok or gen_res.data is None:
-            degraded = True
-            raw_text = self._fallback_reply(gen_res.error)
-        else:
-            raw_text = gen_res.data.text
-
+        for attempt in range(2):
+            try:
+                gen_res = await self.dialogue_expert.run(ctx, tool_round=attempt)
+                if not gen_res.ok or gen_res.data is None:
+                    degraded = attempt > 0
+                    raw_text = self._fallback_reply(gen_res.error)
+                else:
+                    raw_text = gen_res.data.text
+                break
+            except ToolCallSignal as sig:
+                await self._run_tool(sig, ctx, vision, user_text, on_notice)
+                continue
         return await self._finalize_turn(
             ctx, session, user_id, user_text, raw_text, degraded, start,
             persist=persist, now=now, profile=profile)
@@ -343,152 +284,94 @@ class ConversationOrchestrator:
         # ---- 并行：情感分析 + 记忆检索 + 意图路由 ----
         emo_task = asyncio.create_task(self.emotion_analyst.run(ctx))
         mem_task = asyncio.create_task(self.memory_expert.run(ctx))
-        route_task = asyncio.create_task(self._route_intent(user_text))
-        emo_res, mem_res, route = await asyncio.gather(
-            emo_task, mem_task, route_task, return_exceptions=True)
-        tool = (route or {}).get("tool", "none") \
-            if isinstance(route, dict) else "none"
-        query = (route or {}).get("query", "") if isinstance(route, dict) else ""
-        logger.info("意图路由：%s（%s）", tool, query[:30])
-
-        # 路由命中工具 → 先应一声（on_notice 异步播报，不阻塞查询）
-        if tool != "none" and on_notice is not None:
-            notice = {"weather": "等等哈，我看看天气……",
-                      "search": "等等哈，我查查……",
-                      "vision": "稍等，我看看……"}.get(tool)
-            if notice:
-                try:
-                    r = on_notice(notice)
-                    if asyncio.iscoroutine(r):
-                        asyncio.ensure_future(r)
-                except Exception:
-                    pass
-
-        wx_task: asyncio.Task | None = None
-        sr_task: asyncio.Task | None = None
-        vlm_task: asyncio.Task | None = None
-        if tool == "weather" and self.weather is not None:
-            wx_task = asyncio.create_task(self.weather.fetch())
-        elif tool == "search" and self.search is not None:
-            sr_task = asyncio.create_task(self.search.fetch(query or user_text))
-        elif tool == "vision" and vision is not None:
-            vlm_task = asyncio.create_task(self._vlm_describe(vision, query))
-
-        briefs: list[str] = []
-        TOOL_TIMEOUT = 6.0
-        if wx_task is not None:
-            try:
-                brief = await asyncio.wait_for(wx_task, timeout=TOOL_TIMEOUT)
-                if brief:
-                    briefs.append(brief)
-            except asyncio.TimeoutError:
-                logger.info("天气查询超时（%.0fs），放弃注入直答", TOOL_TIMEOUT)
-            except Exception as exc:
-                logger.warning("天气查询异常（忽略）：%s", exc)
-        if sr_task is not None:
-            try:
-                brief = await asyncio.wait_for(sr_task, timeout=TOOL_TIMEOUT)
-                if brief:
-                    briefs.append("联网查到的资料（可用可不用）：" + brief)
-            except asyncio.TimeoutError:
-                logger.info("搜索超时（%.0fs），放弃注入直答", TOOL_TIMEOUT)
-            except Exception as exc:
-                logger.warning("搜索查询异常（忽略）：%s", exc)
-        if vlm_task is not None and vision is not None:
-            try:
-                desc = await asyncio.wait_for(vlm_task, timeout=TOOL_TIMEOUT)
-                if desc:
-                    vision.raw["_vlm"] = desc
-                    logger.info("云端视觉描述：%s", desc[:40])
-            except asyncio.TimeoutError:
-                logger.info("云端视觉超时（%.0fs），无视觉提示直答", TOOL_TIMEOUT)
-            except Exception as exc:
-                logger.warning("云端视觉异常（忽略）：%s", exc)
-        if briefs:
-            ctx.tool_brief = "\n".join(briefs)
+        emo_res, mem_res = await asyncio.gather(emo_task, mem_task,
+                                                return_exceptions=True)
         if isinstance(emo_res, Exception):
             logger.warning("情感分析 Agent 失败：%s", emo_res)
         if isinstance(mem_res, Exception):
             logger.warning("记忆检索 Agent 失败：%s", mem_res)
 
-        # ---- 流式生成回复 ----
+        # ---- 流式生成（工具标记 → 执行工具 → 携带结果重生成，最多 2 轮）----
         raw_text = ""
         degraded = False
         streamed = False
-        if hasattr(self.dialogue_expert.llm, "stream"):
+        for attempt in range(2):
+            streamed = False
             try:
-                async for delta in self.dialogue_expert.stream(ctx):
+                async for delta in self.dialogue_expert.stream(
+                        ctx, tool_round=attempt):
                     raw_text += delta
                     streamed = True
                     if on_chunk is not None:
                         r = on_chunk(delta)
                         if asyncio.iscoroutine(r):
                             await r
+                break   # 正常完成
+            except ToolCallSignal as sig:
+                if streamed:
+                    # 异常前已有正文流出（理论上不该发生）——不重生成，直出
+                    logger.warning("工具标记出现在正文后（忽略）：%s", sig)
+                    break
+                await self._run_tool(sig, ctx, vision, user_text, on_notice)
+                continue
             except Exception as exc:
                 logger.warning("流式生成中断：%s", exc)
         if not streamed or not raw_text.strip():
             # 回退非流式
-            gen_res = await self.dialogue_expert.run(ctx)
-            degraded = not gen_res.ok or gen_res.data is None
-            raw_text = gen_res.data.text if not degraded \
-                else self._fallback_reply(gen_res.error)
+            try:
+                gen_res = await self.dialogue_expert.run(ctx, tool_round=1)
+                degraded = not gen_res.ok or gen_res.data is None
+                raw_text = gen_res.data.text if not degraded \
+                    else self._fallback_reply(gen_res.error)
+            except ToolCallSignal:
+                degraded = True
+                raw_text = self._fallback_reply("tool signal in fallback")
 
         return await self._finalize_turn(
             ctx, session, user_id, user_text, raw_text, degraded, start,
             persist=persist, now=now, profile=profile)
 
+    async def _run_tool(self, sig: ToolCallSignal, ctx, vision_obs,
+                        user_text: str, on_notice) -> None:
+        """执行 LLM 请求的工具，结果注入 ctx.tool_brief / vision.raw。"""
+        tool, query = sig.tool, sig.query
+        notice = {"weather": "等等哈，我看看天气……",
+                  "search": "等等哈，我查查……",
+                  "vision": "稍等，我看看……"}.get(tool)
+        if notice and on_notice is not None:
+            try:
+                r = on_notice(notice)
+                if asyncio.iscoroutine(r):
+                    await r
+            except Exception:
+                pass
+        try:
+            if tool == "weather" and self.weather is not None:
+                brief = await asyncio.wait_for(self.weather.fetch(), timeout=6.0)
+                if brief:
+                    ctx.tool_brief = brief
+                    logger.info("天气工具命中：%s", brief)
+            elif tool == "search" and self.search is not None:
+                brief = await asyncio.wait_for(
+                    self.search.fetch(query or user_text), timeout=6.0)
+                if brief:
+                    ctx.tool_brief = "联网查到的资料（可用可不用）：" + brief
+                    logger.info("搜索工具命中：%s", brief[:40])
+            elif tool == "vision" and vision_obs is not None:
+                desc = await asyncio.wait_for(
+                    self._vlm_describe(vision_obs, query or user_text),
+                    timeout=6.0)
+                if desc:
+                    vision_obs.raw["_vlm"] = desc
+                    logger.info("云端视觉描述：%s", desc[:40])
+        except asyncio.TimeoutError:
+            logger.info("工具 %s 超时（6s）—— 第二轮将直接以已有知识回答", tool)
+        except Exception as exc:
+            logger.warning("工具 %s 执行失败：%s", tool, exc)
+
     # ------------------------------------------------------------------
     # 内部：回合准备 / 收尾
     # ------------------------------------------------------------------
-
-    async def _route_intent(self, text: str) -> dict:
-        """意图路由：便宜模型判断这条消息需要什么外部能力。
-
-        取代关键词过滤 —— 中文问法是开放集，词表永远补不全。
-        超时/失败 → none（直答，宁缺勿滥：误触发工具的代价是
-        白等数秒+无关信息注入）。
-        """
-        system = (
-            "你是陪伴机器人皮皮的意图路由器。判断用户消息需要什么外部能力：\n"
-            '- weather：天气/气温/降雨/穿衣参考（需要真实天气数据）\n'
-            '- search：外部事实、百科、新闻、人物地点历史事件（皮皮不知道的）\n'
-            '- vision：需要看摄像头画面才能回答（画面里的人/物/穿着/表情，'
-            '或用户问皮皮能不能看见、看到了什么）\n'
-            '- none：闲聊、情感表达、时间日期、关于皮皮自己的状态与能力、'
-            '对皮皮的请求与指令、皮皮自己能答的问题\n'
-            "只输出一行 JSON，不要解释：\n"
-            '{"tool": "weather|search|vision|none", "query": "..."}\n'
-            "query 规则：search 时给关键词化的搜索词；vision 时给观察要点"
-            "（用户的问题）；其余填空字符串。\n"
-            "示例：\n"
-            '今天天气怎么样 → {"tool": "weather", "query": ""}\n'
-            '秦始皇哪年统一六国 → {"tool": "search", "query": "秦始皇 统一六国 年份"}\n'
-            '你能看见我吗 → {"tool": "vision", "query": "用户是否在画面中"}\n'
-            '我穿这件衣服好看吗 → {"tool": "vision", "query": "用户穿着"}\n'
-            '现在几点了 → {"tool": "none", "query": ""}\n'
-            '那你在干什么呀 → {"tool": "none", "query": ""}\n'
-            '你不能看家吗 → {"tool": "none", "query": ""}\n'
-            '我很难过 → {"tool": "none", "query": ""}'
-        )
-        try:
-            resp = await asyncio.wait_for(
-                self.llm.chat([{"role": "system", "content": system},
-                               {"role": "user", "content": text}],
-                              temperature=0.1, max_tokens=60, use_cheap=True),
-                timeout=3.0)
-            txt = (getattr(resp, "text", "") or "").strip()
-            m = re.search(r"\{[^{}]*\}", txt, re.S)
-            if not m:
-                return {"tool": "none", "query": ""}
-            import json as _json
-            data = _json.loads(m.group(0))
-            tool = str(data.get("tool", "none")).lower()
-            if tool not in ("weather", "search", "vision", "none"):
-                tool = "none"
-            return {"tool": tool, "query": str(data.get("query", ""))}
-        except Exception as exc:
-            logger.info("意图路由失败（直答）：%s", exc)
-            return {"tool": "none", "query": ""}
 
     async def _vlm_describe(self, obs: VisionObservation,
                             question: str) -> str | None:
