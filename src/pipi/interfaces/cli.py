@@ -35,6 +35,7 @@ HELP = """
   /memory    查看记住的东西
   /decay     手动跑一次遗忘巡检
   /growth    查看成长档案（阶段/里程碑/偏好）
+  /enroll    登记主人人脸（认主/回家问候的前提）
   /proactive 让皮皮主动说句话
   /reset     清空记忆（不可恢复）
   /forget N  删除第 N 条记忆（先用 /memory 看编号）
@@ -92,6 +93,15 @@ class CLI:
                 print(f"  （语音输入初始化失败：{exc}，退回键盘输入）")
 
     async def run(self) -> None:
+        # 恢复已登记人脸 —— 认主识别（owner_present/回家问候）依赖它
+        rec = getattr(self.app.vision, "recognizer", None)
+        if rec is not None and hasattr(rec, "load_enrolled"):
+            try:
+                faces = self.app.repos.face.all_faces()
+                if faces:
+                    rec.load_enrolled(faces)
+            except Exception:
+                pass
         if self.voice_mode:
             await self.run_voice()
             return
@@ -124,9 +134,9 @@ class CLI:
                 break
 
             # 非 UTF-8 管道/终端可能解码出 surrogate 残留（\udcxx），
-            # 不清洗会一路传到 sqlite 落库时才报错
+            # 不清洗会一路传到 sqlite 落库时才报错；BOM 同理会破坏命令识别
             text = text.encode("utf-8", "surrogateescape").decode("utf-8", "replace")
-            text = text.strip()
+            text = text.lstrip("\ufeff").strip()
             if not text:
                 continue
 
@@ -168,14 +178,14 @@ class CLI:
         self._vp = getattr(self.app, "voiceprint", None)
         self._last_uid = ""
         if self._vp is not None:
-            print("  声纹识别已就绪（第一段语音自动登记为主人；之后自动区分主人/陌生人）")
+            print("  声纹识别已就绪（第一段语音自动登记为主人；之后自动区分主人/陌生人）\n")
 
         # 提醒/待办：绑定发声通道并启动（到点由皮皮自己说）
         self._reminders = getattr(self.app, "reminders", None)
         if self._reminders is not None:
             self._reminders.bind_speak(self._session.try_speak_spontaneous)
             self._reminders.start()
-            print("  提醒/闹铃已就绪（说「提醒我X点…」「设闹钟…」即可）")
+            print("  提醒/闹铃已就绪（说「提醒我X点…」「设闹钟…」即可）\n")
 
         # 生命模块（PULSE 心搏 / 旧 LifeEngine，可配置回退）
         #   pulse.backend: "pulse"(默认，LivingLoop) | "legacy"(旧引擎)
@@ -193,7 +203,7 @@ class CLI:
                 _logging.getLogger("pipi.pulse").setLevel(_logging.INFO)
             label = "PULSE 心搏（呼吸/潮汐/预感/羁绊/日记成长）" \
                 if backend != "legacy" else "生命模块"
-            print(f"  {label}已启动（空闲时会自发念叨、微动作）")
+            print(f"  {label}已启动（空闲时会自发念叨、微动作）\n")
 
         # WebSocket 推送：静态监控页直接订阅（无 Web 服务依赖）
         await self._setup_monitor_push()
@@ -242,6 +252,11 @@ class CLI:
                     except Exception:
                         pass
             self._reminders.sink = _sink_with_diary
+        # 内心状态注入对话：每轮 LLM 读到此刻真实身心（消除"两张皮"）
+        try:
+            self.orch.inner_state_provider = rt.inner_brief
+        except Exception:
+            pass
         return rt
 
     def _build_legacy_life(self):
@@ -308,7 +323,7 @@ class CLI:
 
                 self._life.set_sink(_sink)
             print(f"  监控数据推送 ws://{ws_host}:{ws_port}/ws"
-                  f"（双击打开 web/monitor.html 即可查看）")
+                  f"（双击打开 web/monitor.html 即可查看）\n")
         except Exception as exc:
             print(f"  （WebSocket 推送不可用：{exc}）")
 
@@ -476,6 +491,9 @@ class CLI:
         elif name == "/growth":
             self._show_growth()
 
+        elif name == "/enroll":
+            await self._do_enroll()
+
         elif name == "/proactive":
             await self._do_proactive()
 
@@ -554,6 +572,48 @@ class CLI:
                 f"{k}×{v['count']}" for k, v in top))
         print(f"  │ 相处      相识 {gp.active_days()} 天 · {gp.turns()} 轮对话")
         print("  └─────────────────────────────")
+
+    async def _do_enroll(self) -> None:
+        """登记主人人脸：抓帧 → InsightFace 提特征 → 落库并即时生效。"""
+        vision = self.app.vision
+        rec = getattr(vision, "recognizer", None) if vision else None
+        if vision is None or rec is None or type(vision).__name__ == "MockVision":
+            print("  视觉不可用（无摄像头或缺 opencv/insightface），无法登记人脸。")
+            print('  安装：pip install -e ".[vision]"')
+            return
+        print("  请正对摄像头，保持几秒……")
+        frames = []
+        for _ in range(20):                     # 最多 20 拍，凑 6 张有效帧
+            try:
+                frame = await vision.camera.read()
+            except Exception as exc:
+                print(f"  摄像头读取失败：{exc}")
+                return
+            if frame is not None:
+                frames.append(frame)
+            if len(frames) >= 6:
+                break
+            await asyncio.sleep(0.15)
+        if len(frames) < 3:
+            print("  没抓到足够画面，登记取消（检查摄像头是否被其它程序占用）。")
+            return
+        try:
+            emb = rec.enroll("owner", frames, is_owner=True)
+        except Exception as exc:
+            print(f"  人脸识别初始化失败：{exc}")
+            print("  （InsightFace 首次运行需下载模型，检查网络后重试 /enroll）")
+            return
+        if not emb:
+            print("  没检测到人脸 —— 靠近一点、光线亮一些，再试 /enroll。")
+            return
+        import time as _time
+
+        self.app.repos.face.enroll(
+            "owner", self.user_id, "主人", emb,
+            model=getattr(rec, "model_name", "insightface"),
+            now=_time.time(), is_owner=True,
+        )
+        print(f"  √ 主人人脸已登记（{len(frames)} 帧）。回家问候、'看向你'都会认得你。")
 
     async def _forget_by_index(self, name: str) -> None:
         if not self.app.cfg.get("memory.allow_user_forget", True):
