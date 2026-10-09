@@ -247,6 +247,7 @@ class CLI:
             vision=getattr(self.app, "vision", None),
             motion=getattr(self.app, "motion", None),
             weather=getattr(self.orch, "weather", None),
+            env=getattr(self.orch, "env", None),
         )
         rt.bind_cfg(self.app.cfg)
         # 提醒触发 → 记入当天日记（生命流留痕）
@@ -505,6 +506,21 @@ class CLI:
                 self._reminders.active_uid = uid   # 面板展示谁的待办
         return uid
 
+    def _query_notice(self, text: str) -> str | None:
+        """查询类意图 → 先应一声的提示语（查询在 handle_turn 内并行执行）。"""
+        import random
+
+        try:
+            orch = self.orch
+            if orch.weather is not None and orch.weather.detect(text):
+                return random.choice(("等等哈，我查查天气……",
+                                      "稍等，我看一眼天气……"))
+            if orch.search is not None and orch.search.detect(text):
+                return random.choice(("等等哈，我查查……", "稍等，我搜一下……"))
+        except Exception:
+            pass
+        return None
+
     async def _respond_stream_locked(self, text: str) -> None:
         import time as _time
 
@@ -518,6 +534,14 @@ class CLI:
             from pipi.interfaces.voice import SentenceTTSPlayer
             speaker = SentenceTTSPlayer(self.app.tts)
             self._speaker = speaker
+
+        # 查询类问题（天气/联网搜索）耗时长：先应一声，查询随后并行跑
+        notice = self._query_notice(text)
+        if notice:
+            if speaker is not None:
+                await speaker.feed(notice)
+            else:
+                print(f"皮皮 > （{notice}）", flush=True)
 
         state = {"printed": False, "ttfb_ms": 0}
         obs = await self._vision_for_turn(text)
@@ -591,6 +615,9 @@ class CLI:
 
     async def _say(self, text: str) -> None:
         self.app.proactive_engine.note_user_response(self.app.clock.now())
+        notice = self._query_notice(text)
+        if notice:
+            print(f"皮皮 > （{notice}）", flush=True)
         result = await self.orch.handle_turn(
             self.user_id, text, vision=await self._vision_for_turn(text))
 

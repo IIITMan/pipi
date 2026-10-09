@@ -25,6 +25,25 @@ weather:
   city: "济南"              # 部署城市（可改，如 "北京"）
   sync_interval_s: 1800    # 真实天气 → 生命模块：周期同步间隔（类别变化才调心境）
 
+# 通用联网搜索（零 key：Bing 网页搜索 → Wikipedia 多源链；事实疑问触发）
+search:
+  enabled: true
+  provider: "auto"         # auto(顺序尝试 bing→wikipedia) | bing | wikipedia | mock
+
+# 条件预警（贾维斯化②：不等你问，先开口；有料才说、有冷却、不打扰）
+alerts:
+  enabled: true
+  report_home: true        # 主人回家 → 汇报今日提醒/异常（没料就默默高兴）
+  report_stranger: true    # 陌生人当日累计 ≥ stranger_min 次 → 提醒主人留意
+  home_cooldown_s: 1800    # 回家汇报冷却（30 分钟一次）
+  stranger_cooldown_s: 3600  # 陌生人预警冷却（1 小时一次）
+  stranger_min: 2          # 当日陌生人事件达到几次才预警
+
+# 环境档案（贾维斯化③：家的持续认知，JSON 落盘 data/environment.json）
+env:
+  enabled: true
+  max_arrivals: 14         # 记住最近几次主人回家钟点，用于学"几点回来"
+
 # ---------------- 人格 ----------------
 persona:
   active: "tsundere"           # 对应 configs/personas/<id>.yaml
@@ -200,8 +219,9 @@ audio:
       timeout_s: 10             # 阶段4：会话内安静多久回待机（8~12）
       barge_in: true            # 阶段3：抢话打断（外放音箱误触发时可关）
       barge_in_min_ms: 200      # 持续人声多久触发打断
-      barge_in_arm_s: 0.6       # 开播后多久内不响应打断（防回声自触）
-      barge_in_multiplier: 1.6  # 打断能量倍数（麦克风灵敏度高/误触发就调大）
+      barge_in_arm_s: 1.0       # 开播后多久内不响应打断（防回声自触）
+      barge_in_multiplier: 1.15 # 打断能量倍数（相对说话阈值；另有回声自适应
+                                # 基线保护，播报声大时打断线随之上浮）
   # 打断
   interrupt:
     enabled: true

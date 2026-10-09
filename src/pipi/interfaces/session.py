@@ -287,6 +287,7 @@ class InteractionSession:
         self.barge_min_ms = cfg.get("audio.mic.session.barge_in_min_ms", 200)
         self.barge_arm_s = cfg.get("audio.mic.session.barge_in_arm_s", 0.6)
         self.barge_mult = cfg.get("audio.mic.session.barge_in_multiplier", 1.6)
+        self._echo_rms = 0.0            # 扬声器回声 RMS 基线（EMA，打断线用）
 
         # 唤醒应答预热：后台提前合成并缓存，首次唤醒即零延迟
         prewarm = getattr(self.tts, "prewarm", None)
@@ -683,14 +684,22 @@ class InteractionSession:
         if now - self._resp_started < self.barge_arm_s:
             return
         level = _rms(frame)
-        if level >= self.capture.threshold * self.barge_mult:
+        # 回声自适应：播报期间用非人声帧估计扬声器回声水平（EMA），
+        # 打断线 = max(说话阈值 × 倍数, 回声 × 1.4) —— 播报声小时稍大声即
+        # 可打断，播报声大时基线随之上浮防自触发
+        if level < self.capture.threshold * self.barge_mult:
+            self._echo_rms = (0.8 * self._echo_rms + 0.2 * level
+                              if self._echo_rms else level)
+        line = max(self.capture.threshold * self.barge_mult,
+                   self._echo_rms * 1.4)
+        if level >= line:
             if self._loud_frames == 0:
                 # 用户声音起点：从这里截取缓冲作为打断后的句子开头
                 self._seg_start = max(0, len(self._pending) - 1)
             self._loud_frames += 1
             if self.verbose and self._loud_frames % 3 == 0:
                 self._notify(f"  打断累计 {self._loud_frames * self.FRAME_MS * 1000:.0f}ms"
-                             f"（RMS {level:.0f} / 需 {self.capture.threshold * self.barge_mult:.0f}）")
+                             f"（RMS {level:.0f} / 需 {line:.0f}）")
         else:
             self._loud_frames = 0
         if self._loud_frames * (self.FRAME_MS * 1000) >= self.barge_min_ms:
