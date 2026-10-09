@@ -252,3 +252,19 @@ class InsightFaceRecognizer:
         for f in faces:
             if f.get("embedding"):
                 self._enrolled[f["person_id"]] = f["embedding"]
+
+    def detect_faces(self, frame) -> list[BBox]:
+        """用 InsightFace 自带检测器出人脸框。
+
+        YuNet 缺模型文件、Haar 在 opencv 5.0 下不可用 —— 识别器的
+        检测是最可靠的兜底（process_frame 检出 0 脸时调用）。
+        """
+        try:
+            self._ensure()
+            out = []
+            for f in self._app.get(frame):
+                x1, y1, x2, y2 = [int(v) for v in f.bbox[:4]]
+                out.append(BBox(x=x1, y=y1, w=max(0, x2 - x1), h=max(0, y2 - y1)))
+            return out
+        except Exception:
+            return []
