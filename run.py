@@ -30,6 +30,11 @@ def main():
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(errors="replace")
 
+    # insightface 内部还在用 scikit-image 已弃用的 estimate API（上游未跟进，
+    # 功能正常），每次人脸对齐都会打一条 FutureWarning —— 静音
+    import warnings
+    warnings.filterwarnings("ignore", message="`estimate` is deprecated")
+
     ap = argparse.ArgumentParser(description="皮皮 · 情感陪伴机器人")
     ap.add_argument("--sim", action="store_true",
                     help="全模拟模式（无模型/无硬件也能跑）")
