@@ -105,6 +105,15 @@ class PulseRuntime:
         self._last_thought_desc = ""
         self._activity_desc = ""
         self._last_event_logged: float = 0.0   # user_voice 节流
+        # 身体/行为（每帧缓存 → 监控展示；硬件端口 action_sink 预留）
+        self._body_state: dict = {"lamp": 0.0, "eye": "正常",
+                                  "pose": "松弛", "act": ""}
+        self._behavior: dict = {"motion": "idle", "target": "none",
+                                "zh": "安静地待着"}
+        self.action_sink = None       # 硬件接入：赋值实现 ActionSink 协议的对象
+        # 主动说话的 LLM 渲染端口（统一说话）：传入"内心事件"，返回一句自然台词；
+        # 默认 None → 用固定句库。由 cli/orchestrator 注册（走 handle_proactive）。
+        self.vocal_renderer: Callable[[str], Any] | None = None
 
         # 监控上报
         self._sink: Callable[[dict], None] | None = None
@@ -147,6 +156,16 @@ class PulseRuntime:
     def bind_cfg(self, full_cfg: Any) -> None:
         """绑定完整配置（供感知循环读 life.perception 参数）。"""
         self._full_cfg = full_cfg
+
+    def latest_observation(self):
+        """最新一帧视觉观测（感知循环产出；未启动/无帧返回 None）。
+
+        对话应答应从这里取观测注入 prompt（PERCEPTION_PLAN ①裁定：
+        感知循环是 capture() 的唯一消费者，对话侧不得抢拍，
+        否则会吃掉 owner_newly_arrived 状态沿 → 回家问候丢失）。
+        """
+        perc = getattr(self, "_perception", None)
+        return perc.latest if perc is not None else None
 
     async def stop(self) -> None:
         self._running = False
@@ -202,6 +221,57 @@ class PulseRuntime:
         # 留痕最近对话情绪（监控"心情"可见，60s 后回落）
         self._last_chat_mood = key
         self._last_chat_mood_t = self._mono()
+
+    # ------------------------------------------------------------------
+    # 内心状态 → 对话（消除"两张皮"的关键：LLM 每轮读到此刻真实身心）
+    # ------------------------------------------------------------------
+
+    def inner_brief(self) -> str:
+        """渲染此刻真实的内心状态（第二人称，注入对话 system prompt）。
+        覆盖：心境天气 / 睡眠刚醒 / 主人在场与思念 / 信任与认主 /
+        当前意图 / 惊吓余韵。只写有信息量的行。"""
+        s = self.loop.snapshot()
+        hour = self.clock.now_hour()
+        sleeping = self.loop.is_sleeping(hour)
+        sim = self.loop.sim_seconds
+        lines = [f'- 心境天气：{s["weather"]["label"]}']
+
+        # 睡眠 / 刚被叫醒
+        if sleeping:
+            lines.append("- 你正在睡觉，是被他叫醒的，脑子和声音都还迷糊、发懵")
+        elif sim < self.loop.wake_until and hour < 8.0:
+            lines.append("- 你刚从睡梦里被叫醒没多久，还没完全缓过神")
+
+        # 主人在场 / 离开与思念
+        if s["owner_present"]:
+            lines.append("- 他此刻就在你身边")
+        else:
+            sep_h = self.loop.sep_min / 60.0
+            lines.append(f"- 他不在，已经离开约 {sep_h:.1f} 小时，"
+                         "你心里的思念一直在涨")
+
+        # 关系：信任与认主
+        trust = s["trust"]
+        if self.loop.bond.imprinted:
+            rel = "你已经认定他是主人，满心都是他"
+        elif trust < 40:
+            rel = "你们还在熟悉阶段，你有点认生"
+        elif trust < 70:
+            rel = "你越来越信任、依赖他"
+        else:
+            rel = "你非常信任他，和他在一起很放松"
+        lines.append(f"- 关系：信任 {trust:.0f}/100，{rel}")
+
+        # 当前意图
+        if self._last_thought_desc:
+            lines.append(f"- 你心里此刻正想：{self._last_thought_desc}")
+
+        # 惊吓余韵（60s 内）
+        if self.loop._startle and sim - self.loop._startle_t < 60.0:
+            lines.append("- 你刚刚被吓了一跳，心还在突突，语气会发紧、发虚")
+
+        return ("你此刻真实的身心状态（你的语气、用词、内容必须和它一致，"
+                "不能和它矛盾）：\n" + "\n".join(lines))
 
     # ------------------------------------------------------------------
     # 视觉感知注入（PerceptionLoop → inject）
@@ -292,7 +362,17 @@ class PulseRuntime:
 
         snap = self.loop.tick(self.tick_s, hour)
         self._last_thought_desc = self._describe_intent(snap)
+        # 身体状态 + 意图→行为：缓存供监控，并驱动硬件端口（若已接）
+        self._body_state = dict(snap["body"])
         self._activity_desc = snap["body"].get("act", "") or ""
+        from pipi.pulse.expression import behavior_from_intent
+        self._behavior = behavior_from_intent(
+            snap.get("intent"), bool(self.loop.owner_present))
+        if self.action_sink is not None:
+            try:
+                self.action_sink.apply(self._body_state, self._behavior)
+            except Exception as exc:
+                logger.debug("动作端口 apply 失败：%s", exc)
 
         # 自发发声：每 5s 决策一次（非睡眠、冷却过、概率命中、会话空闲）
         self._since_vocal += self.tick_s
@@ -310,23 +390,54 @@ class PulseRuntime:
             return
         intent = snap.get("intent")
         kind = intent.kind if intent is not None else "useless"
-        lines = _VOCALS.get(kind)
-        if not lines:
-            return
-        # 只想陪/好奇时才开口（克制：概率 × 主导强度）
+        # 克制：概率 × 主导强度
         strength = snap["tension"].waves.get(
             kind if kind != "useless" else "loneliness", 0.0)
         prob = self.vocal_prob * (0.5 + strength)
         if self._rng.random() >= prob:
             return
-        text = self._rng.choice(lines)
-        if text.startswith("("):       # 哼歌/伸懒腰：仅内心与动作，不占发声
-            self._event_log("inner", text)
-            self._last_vocal = now
-            return
+        # 命中：先占冷却，再异步表达（LLM 统一渲染，句库兜底）
         self._last_vocal = now
+        fallback = self._rng.choice(_VOCALS.get(kind, ("（发了一会儿呆）",)))
+        if fallback.startswith("("):     # 内心动作（哼歌/懒腰）：不发声
+            self._event_log("inner", fallback)
+            return
+        try:
+            asyncio.create_task(self._render_and_speak(kind, fallback))
+        except RuntimeError:
+            self._speak_fallback(fallback)
+
+    async def _render_and_speak(self, kind: str, fallback: str) -> None:
+        """统一说话：优先 LLM 按内心状态渲染；失败/无渲染器 → 固定句库。"""
+        text = fallback
+        if self.vocal_renderer is not None:
+            try:
+                r = self.vocal_renderer(self._vocal_event(kind))
+                if asyncio.iscoroutine(r):
+                    r = await r
+                if r:
+                    text = r
+            except Exception as exc:
+                logger.debug("主动说话 LLM 渲染失败，用句库：%s", exc)
         ok = self.session.try_speak_spontaneous(text)
         self._event_log("vocal" if ok else "muted", text)
+
+    def _speak_fallback(self, text: str) -> None:
+        ok = self.session.try_speak_spontaneous(text)
+        self._event_log("vocal" if ok else "muted", text)
+
+    def _vocal_event(self, kind: str) -> str:
+        """构造给 LLM 的内心事件（结合意图理由/分离时长，一句话）。"""
+        sep_h = self.loop.sep_min / 60.0
+        if kind == "loneliness":
+            return (f"你已经 {sep_h:.1f} 小时没见到主人了，有点想他、"
+                    "也有点小委屈，想主动说句话")
+        if kind == "curiosity":
+            return "你察觉到一点动静，好奇心上来了，想主动念叨一句"
+        if kind == "attachment":
+            return "主人就在旁边，你心里暖暖的，想主动撒个娇"
+        from pipi.pulse.organs.will import REASON
+        return f"你{REASON.get(kind, '有点想搭话')}，主动开口说一句"
 
     def _describe_intent(self, snap: dict) -> str:
         intent = snap.get("intent")
@@ -418,6 +529,8 @@ class PulseRuntime:
                 "owner_present": s["owner_present"],
                 "sleeping": sleeping,
                 "sess_phase": sess_phase,
+                "body": self._body_state,
+                "behavior": self._behavior,
                 "last_chat_mood": (self._last_chat_mood
                                    if self._mono() - self._last_chat_mood_t <= 60.0
                                    else ""),

@@ -64,6 +64,7 @@ class CLI:
         self._session: Any | None = None
         self._speaker: Any | None = None
         self._hub: Any | None = None
+        self._life: Any | None = None
         self._chat_lock: asyncio.Lock | None = None
         self._vp: Any | None = None
         self._active_uid: str = user_id
@@ -257,6 +258,14 @@ class CLI:
             self.orch.inner_state_provider = rt.inner_brief
         except Exception:
             pass
+        # 统一说话：主动发声也走 LLM（按内心事件渲染），句库在 runtime 内兜底
+        async def _render_vocal(event, _cli=self):
+            uid = getattr(_cli, "_active_uid", None) or "owner"
+            res = await _cli.orch.handle_proactive(uid, event)
+            if res.bubbles:
+                return res.bubbles[0].text or None
+            return getattr(res, "text", None) or None
+        rt.vocal_renderer = _render_vocal
         return rt
 
     def _build_legacy_life(self):
@@ -333,10 +342,29 @@ class CLI:
             self._speaker.abort()
             self._speaker = None
 
+    async def _current_vision(self):
+        """对话用的视觉观测：优先感知循环最新帧（≤5s），否则现场拍一帧。
+
+        感知循环未启动（纯文本模式无竞争）才允许现场 capture；
+        voice 模式抢拍会吃掉 owner_newly_arrived 状态沿（PERCEPTION_PLAN ①）。
+        """
+        import time as _time
+
+        vision = getattr(self.app, "vision", None)
+        if vision is None:
+            return None
+        life = self._life
+        latest = life.latest_observation() if life is not None else None
+        if latest is not None and _time.time() - latest.timestamp < 5.0:
+            return latest
+        try:
+            return await vision.capture()
+        except Exception:
+            return None
+
     async def _respond_stream(self, text: str) -> None:
         """应答：LLM 流式 → 逐字显示 + 分句 TTS 边生成边播放。"""
         import time as _time
-
         self._active_uid = getattr(self._session, "current_user_id", "") \
             or self.user_id
         if self._chat_lock is None:
@@ -390,8 +418,9 @@ class CLI:
             if speaker is not None:
                 await speaker.feed(delta)
 
-        result = await self.orch.handle_turn_stream(self._active_uid, text,
-                                                    on_chunk=on_chunk)
+        result = await self.orch.handle_turn_stream(
+            self._active_uid, text, on_chunk=on_chunk,
+            vision=await self._current_vision())
         if state["printed"]:
             print(flush=True)
         else:
@@ -438,7 +467,8 @@ class CLI:
                 self._hub.broadcast({"type": "thinking", "data": {}})
             if self._life is not None:
                 self._life.log_chat("user", text)
-            result = await self.orch.handle_turn_stream(self.user_id, text)
+            result = await self.orch.handle_turn_stream(
+                self.user_id, text, vision=await self._current_vision())
             if self._life is not None:
                 for b in result.bubbles:
                     self._life.log_chat("pipi", b.text)
@@ -448,7 +478,8 @@ class CLI:
 
     async def _say(self, text: str) -> None:
         self.app.proactive_engine.note_user_response(self.app.clock.now())
-        result = await self.orch.handle_turn(self.user_id, text)
+        result = await self.orch.handle_turn(self.user_id, text,
+                                             vision=await self._current_vision())
 
         for b in result.bubbles:
             print(f"皮皮 > {b.text}")
