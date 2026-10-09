@@ -19,6 +19,8 @@ class OpenCVCamera:
         self.width = width
         self.height = height
         self._cap: Any = None
+        import threading
+        self._lock = threading.Lock()   # VideoCapture 非线程安全，串行化 read
 
     def is_available(self) -> bool:
         try:
@@ -41,20 +43,32 @@ class OpenCVCamera:
             time.sleep(0.8 * (attempt + 1))
         return False
 
-    async def open(self) -> None:
+    def _open_sync(self):
+        """阻塞的 VideoCapture 构造（DSHOW 初始化 1~3s），只允许在工作线程跑。"""
         import cv2
-        self._cap = cv2.VideoCapture(self.index, cv2.CAP_DSHOW)
-        self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
-        self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
-        if not self._cap.isOpened():
+        cap = cv2.VideoCapture(self.index, cv2.CAP_DSHOW)
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+        if not cap.isOpened():
             # 初始化竞争时重试一次
-            self._cap.release()
-            self._cap = cv2.VideoCapture(self.index, cv2.CAP_DSHOW)
+            cap.release()
+            cap = cv2.VideoCapture(self.index, cv2.CAP_DSHOW)
+        return cap
+
+    async def open(self) -> None:
+        import asyncio
+        self._cap = await asyncio.to_thread(self._open_sync)
 
     async def read(self):
+        """抓一帧。cv2 read 是同步阻塞调用（数十 ms~数秒，驱动异常时无限阻塞），
+        必须丢线程池 —— 在事件循环里直接调会冻结输入/心搏/TTS/WS（卡死根因）。"""
+        import asyncio
         if self._cap is None:
             await self.open()
-        ok, frame = self._cap.read()
+        if self._cap is None:
+            return None
+        with self._lock:
+            ok, frame = await asyncio.to_thread(self._cap.read)
         return frame if ok else None
 
     async def close(self) -> None:
