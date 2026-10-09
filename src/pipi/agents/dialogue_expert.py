@@ -24,7 +24,8 @@ from pipi.providers.llm.prompt_builder import PromptBuilder
 
 logger = logging.getLogger(__name__)
 
-_TOOL_RE = re.compile(r"^\[(WEATHER|SEARCH|VISION)\s*[:：]\s*([^\]]{0,80})\]")
+_TOOL_RE = re.compile(
+    r"^\s*\[(WEATHER|SEARCH|VISION)\s*[:：]\s*([^\]]{0,80})\]")
 
 TOOL_PROTOCOL = (
     "\n\n# 工具调用协议（必须遵守）\n"
@@ -208,13 +209,15 @@ class DialogueExpert(BaseAgent):
                 yield delta
                 continue
             buf += delta
-            m = _TOOL_RE.match(buf)
+            stripped = buf.lstrip()
+            m = _TOOL_RE.match(stripped)
             if m:
                 raise ToolCallSignal(m.group(1), m.group(2).strip())
-            if len(buf) >= 14 or not buf.lstrip().startswith("["):
-                decided = True
-                if buf:
-                    yield buf
+            if stripped.startswith("[") and "]" not in stripped and len(buf) < 96:
+                continue   # 疑似标记未闭合 → 继续等（要点可能很长）
+            decided = True
+            if buf:
+                yield buf
                 continue
         if not decided and buf:
             yield buf   # 流结束时仍未判定（短回答），冲刷缓冲
