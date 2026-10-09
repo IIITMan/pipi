@@ -439,8 +439,22 @@ class CLI:
                     {"type": "image_url", "image_url": {"url": data_url}},
                 ]},
             ]
-            resp = await self.app.llm.chat(messages, temperature=0.3,
-                                           max_tokens=120)
+            # 方舟要求视觉输入必须用支持视觉的模型：配置了 vlm_model
+            # （视觉端点）时走独立实例，否则用主对话模型
+            llm = self.app.llm
+            vlm_model = self.app.cfg.get("vision.vlm_model", "")
+            if vlm_model and vlm_model != getattr(llm, "model", ""):
+                from pipi.providers.llm.openai_compat import OpenAICompatLLM
+                probe = OpenAICompatLLM(
+                    base_url=llm.base_url, api_key=llm.api_key,
+                    model=vlm_model, name="vlm",
+                    extra_body=getattr(llm, "extra_body", None),
+                    timeout_s=getattr(llm, "timeout_s", 30))
+                resp = await probe.chat(messages, temperature=0.3,
+                                        max_tokens=120)
+            else:
+                resp = await llm.chat(messages, temperature=0.3,
+                                      max_tokens=120)
             text = getattr(resp, "text", "") or ""
             return text.strip() or None
         except Exception as exc:

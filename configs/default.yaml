@@ -312,8 +312,12 @@ vision:
   follow_deadzone: 0.12        # 归一化偏移死区（0~0.5）
   follow_cooldown_s: 2.0       # 两次转向的最小间隔
   # 云端传图识别（多模态 LLM）：对话提到视觉相关内容时，把当前画面
-  # 连同问题一起发给模型（走 llm 的接入点，需该端点支持图片输入）
+  # 连同问题一起发给模型（方舟 Chat API 的 image_url 格式，
+  # data URL 与公网 URL 均可；图片 ≤10MB，JPEG/PNG/BMP/WEBP）
   vlm: true
+  # 视觉接入点：主对话模型若不支持图片输入，在此填支持视觉的
+  # 推理接入点 id；留空则复用 llm.model
+  vlm_model: ""
   # 监控页画面推流（JPEG 经 WS 到 web/monitor.html；只推流不落盘）
   monitor_stream: true
   monitor_fps: 0.5
