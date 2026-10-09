@@ -442,6 +442,7 @@ def build_app(cfg: Config | None = None, *, sim: bool = False,
         tts=app_ctx.get("tts"), motion=app_ctx.get("motion"),
         owner_name=owner_name,
         growth=growth_engine,
+        cfg=cfg,
     )
 
     # 天气工具（免费 Open-Meteo，零成本；失败静默降级）

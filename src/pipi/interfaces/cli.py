@@ -406,80 +406,31 @@ class CLI:
                 frame = await vision.camera.read()
                 if frame is None:
                     return None
-                return await asyncio.to_thread(vision.process_frame, frame)
+                obs = await asyncio.to_thread(vision.process_frame, frame)
+                obs.raw["_frame"] = frame
+                return obs
             return await vision.capture()
         except Exception:
             return None
 
-    # 云端视觉触发词（收紧：只有真的在问画面内容才传图，
-    # "星期几/几点"这类皮皮自己能答的问题不触发）
-    _VLM_HINT_WORDS = ("看见", "看到", "我穿", "衣服", "表情",
-                       "长什么样", "长啥样", "认出", "认得")
-
-    def _looks_visual(self, text: str) -> bool:
-        return any(k in text for k in self._VLM_HINT_WORDS)
-
-    async def _cloud_describe(self, question: str) -> str | None:
-        """把当前画面传给多模态 LLM，换回一句客观描述（复杂视觉理解上云）。"""
-        vision = getattr(self.app, "vision", None)
-        if vision is None or type(vision).__name__ != "VisionPipeline":
-            return None
-        try:
-            import base64
-
-            import cv2
-            frame = await vision.camera.read()
-            if frame is None:
-                return None
-            ok, buf = cv2.imencode(
-                ".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
-            if not ok:
-                return None
-            data_url = "data:image/jpeg;base64," + base64.b64encode(buf).decode()
-            messages = [
-                {"role": "system",
-                 "content": "你是机器人皮皮的眼睛。用中文客观描述画面："
-                            "有几个人、衣着颜色、表情与姿态。不要寒暄，"
-                            "不超过 60 字。"},
-                {"role": "user", "content": [
-                    {"type": "text",
-                     "text": question or "描述你现在看到的画面"},
-                    {"type": "image_url", "image_url": {"url": data_url}},
-                ]},
-            ]
-            # 方舟要求视觉输入必须用支持视觉的模型：配置了 vlm_model
-            # （视觉端点）时走独立实例，否则用主对话模型
-            llm = self.app.llm
-            vlm_model = self.app.cfg.get("vision.vlm_model", "")
-            if vlm_model and vlm_model != getattr(llm, "model", ""):
-                from pipi.providers.llm.openai_compat import OpenAICompatLLM
-                probe = OpenAICompatLLM(
-                    base_url=llm.base_url, api_key=llm.api_key,
-                    model=vlm_model, name="vlm",
-                    extra_body=getattr(llm, "extra_body", None),
-                    timeout_s=getattr(llm, "timeout_s", 30))
-                resp = await probe.chat(messages, temperature=0.3,
-                                        max_tokens=120)
-            else:
-                resp = await llm.chat(messages, temperature=0.3,
-                                      max_tokens=120)
-            text = getattr(resp, "text", "") or ""
-            return text.strip() or None
-        except Exception as exc:
-            logger.debug("云端视觉识别失败：%s", exc)
-            return None
-
-    async def _vision_for_turn(self, text: str):
-        """对话用观测：本地检测 + 可选云端视觉理解（写入 obs.raw['_vlm']）。"""
+    async def _vision_for_turn(self, text: str = ""):
+        """对话用观测：本地检测 + 画面预编码（云端视觉理解由意图路由触发，
+        orchestrator._vlm_describe 使用 raw['_jpeg']）。"""
         obs = await self._current_vision()
-        if (obs is not None and obs.faces
-                and self.app.cfg.get("vision.vlm", True)
-                and self._looks_visual(text)):
-            desc = await self._cloud_describe(text)
-            if desc:
-                obs.raw["_vlm"] = desc
-                if self.verbose:
-                    print(f"  [云端视觉] {desc}", flush=True)
+        if obs is not None and not obs.raw.get("_jpeg"):
+            try:
+                import base64
+
+                import cv2
+                frame = obs.raw.get("_frame")
+                if frame is not None:
+                    ok, buf = cv2.imencode(
+                        ".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+                    if ok:
+                        obs.raw["_jpeg"] = ("data:image/jpeg;base64,"
+                                            + base64.b64encode(buf).decode())
+            except Exception:
+                pass
         return obs
 
     async def _respond_stream(self, text: str) -> None:
@@ -532,21 +483,6 @@ class CLI:
                 self._reminders.active_uid = uid   # 面板展示谁的待办
         return uid
 
-    def _query_notice(self, text: str) -> str | None:
-        """查询类意图 → 先应一声的提示语（查询在 handle_turn 内并行执行）。"""
-        import random
-
-        try:
-            orch = self.orch
-            if orch.weather is not None and orch.weather.detect(text):
-                return random.choice(("等等哈，我查查天气……",
-                                      "稍等，我看一眼天气……"))
-            if orch.search is not None and orch.search.detect(text):
-                return random.choice(("等等哈，我查查……", "稍等，我搜一下……"))
-        except Exception:
-            pass
-        return None
-
     async def _respond_stream_locked(self, text: str) -> None:
         import time as _time
 
@@ -561,13 +497,12 @@ class CLI:
             speaker = SentenceTTSPlayer(self.app.tts)
             self._speaker = speaker
 
-        # 查询类问题（天气/联网搜索）耗时长：先应一声，查询随后并行跑
-        notice = self._query_notice(text)
-        if notice:
+        # 工具查询（意图路由命中）先应一声：on_notice 走同一条 TTS 管线
+        async def _notice_say(s: str) -> None:
             if speaker is not None:
-                await speaker.feed(notice)
+                await speaker.feed(s)
             else:
-                print(f"皮皮 > （{notice}）", flush=True)
+                print(f"皮皮 > （{s}）", flush=True)
 
         state = {"printed": False, "ttfb_ms": 0}
         obs = await self._vision_for_turn(text)
@@ -583,7 +518,7 @@ class CLI:
 
         result = await self.orch.handle_turn_stream(
             self._active_uid, text, on_chunk=on_chunk,
-            vision=obs)
+            vision=obs, on_notice=_notice_say)
         if state["printed"]:
             print(flush=True)
         else:
@@ -631,7 +566,8 @@ class CLI:
             if self._life is not None:
                 self._life.log_chat("user", text)
             result = await self.orch.handle_turn_stream(
-                self.user_id, text, vision=await self._vision_for_turn(text))
+                self.user_id, text, vision=await self._vision_for_turn(text),
+                on_notice=lambda s: print(f"皮皮 > （{s}）", flush=True))
             if self._life is not None:
                 for b in result.bubbles:
                     self._life.log_chat("pipi", b.text)
@@ -641,11 +577,9 @@ class CLI:
 
     async def _say(self, text: str) -> None:
         self.app.proactive_engine.note_user_response(self.app.clock.now())
-        notice = self._query_notice(text)
-        if notice:
-            print(f"皮皮 > （{notice}）", flush=True)
         result = await self.orch.handle_turn(
-            self.user_id, text, vision=await self._vision_for_turn(text))
+            self.user_id, text, vision=await self._vision_for_turn(text),
+            on_notice=lambda s: print(f"皮皮 > （{s}）", flush=True))
 
         for b in result.bubbles:
             print(f"皮皮 > {b.text}")

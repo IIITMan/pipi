@@ -83,7 +83,11 @@ class VisionPipeline:
         frame = await _maybe_await(self.camera.read())
         if frame is None:
             return None
-        return self.process_frame(frame)
+        obs = self.process_frame(frame)
+        if obs is not None:
+            # 原帧挂到观测上（不落盘）：云端视觉/监控推流复用，免二次抓拍
+            obs.raw["_frame"] = frame
+        return obs
 
     def process_frame(self, frame) -> VisionObservation:
         """处理单帧。可被 mock/离线场景直接调用。"""

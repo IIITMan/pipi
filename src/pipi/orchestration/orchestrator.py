@@ -25,7 +25,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
@@ -96,10 +98,17 @@ class ConversationOrchestrator:
         reminders: Any | None = None,
         inner_state_provider: Callable[[], str] | None = None,
         weather: Any | None = None,
+        search: Any | None = None,
+        env: Any | None = None,
+        cfg: Any | None = None,
     ):
         self.llm = llm
         self.persona = persona
         self.memory = memory
+        self.search = search
+        self.env = env
+        self.cfg_snapshot = (getattr(cfg, "data", None) or {}) if cfg is not None \
+            else (cfg or {})
         self.emotion_analyst = emotion_analyst
         self.memory_expert = memory_expert
         self.dialogue_expert = dialogue_expert
@@ -160,8 +169,13 @@ class ConversationOrchestrator:
         transcript: Any | None = None,
         vision: VisionObservation | None = None,
         persist: bool = True,
+        on_notice: Any = None,
     ) -> TurnResult:
-        """处理一轮对话。"""
+        """处理一轮对话。
+
+        on_notice：工具查询（天气/搜索/视觉）启动时的"先应一声"回调，
+        接收一句提示文本（如"等等哈，我查查……"）。
+        """
         # 提醒/待办入口：规则解析命中则直接返回（不消耗 LLM）
         if self.reminders is not None:
             try:
@@ -188,37 +202,74 @@ class ConversationOrchestrator:
             except Exception as exc:
                 logger.debug("环境档案记录失败（忽略）：%s", exc)
 
-        # ---- 并行：情感分析 + 记忆检索 + 天气/搜索查询 ----
+        # ---- 并行：情感分析 + 记忆检索 + 意图路由 ----
         emo_task = asyncio.create_task(self.emotion_analyst.run(ctx))
         mem_task = asyncio.create_task(self.memory_expert.run(ctx))
+        route_task = asyncio.create_task(self._route_intent(user_text))
+        emo_res, mem_res, route = await asyncio.gather(
+            emo_task, mem_task, route_task, return_exceptions=True)
+        tool = (route or {}).get("tool", "none") \
+            if isinstance(route, dict) else "none"
+        query = (route or {}).get("query", "") if isinstance(route, dict) else ""
+        logger.info("意图路由：%s（%s）", tool, query[:30])
+
+        # 路由命中工具 → 先应一声（on_notice 异步播报，不阻塞查询）
+        if tool != "none" and on_notice is not None:
+            notice = {"weather": "等等哈，我看看天气……",
+                      "search": "等等哈，我查查……",
+                      "vision": "稍等，我看看……"}.get(tool)
+            if notice:
+                try:
+                    r = on_notice(notice)
+                    if asyncio.iscoroutine(r):
+                        asyncio.ensure_future(r)
+                except Exception:
+                    pass
+
         wx_task: asyncio.Task | None = None
         sr_task: asyncio.Task | None = None
-        if self.weather is not None and self.weather.detect(user_text):
+        vlm_task: asyncio.Task | None = None
+        if tool == "weather" and self.weather is not None:
             wx_task = asyncio.create_task(self.weather.fetch())
-        elif self.search is not None and self.search.detect(user_text):
-            # 关键词命中 → 便宜模型二次确认是否真需联网（与情感/记忆
-            # 并行跑，不增首响；'星期几/几点'这类被过滤，不再拉维基）
-            sr_task = asyncio.create_task(
-                self.search.smart_fetch(user_text, gate=self._search_gate))
-        emo_res, mem_res = await asyncio.gather(emo_task, mem_task,
-                                                return_exceptions=True)
+        elif tool == "search" and self.search is not None:
+            sr_task = asyncio.create_task(self.search.fetch(query or user_text))
+        elif tool == "vision" and vision is not None:
+            vlm_task = asyncio.create_task(self._vlm_describe(vision, query))
+
         briefs: list[str] = []
+        # 工具查询限时：超时放弃注入、直答 —— 搜索链最坏可拖 16s，
+        # 不能让它卡住首响
+        TOOL_TIMEOUT = 6.0
         if wx_task is not None:
             try:
-                brief = await wx_task
+                brief = await asyncio.wait_for(wx_task, timeout=TOOL_TIMEOUT)
                 if brief:
                     briefs.append(brief)
                     logger.info("天气工具命中：%s", brief)
+            except asyncio.TimeoutError:
+                logger.info("天气查询超时（%.0fs），放弃注入直答", TOOL_TIMEOUT)
             except Exception as exc:
                 logger.warning("天气查询异常（忽略）：%s", exc)
         if sr_task is not None:
             try:
-                brief = await sr_task
+                brief = await asyncio.wait_for(sr_task, timeout=TOOL_TIMEOUT)
                 if brief:
                     briefs.append("联网查到的资料（可用可不用）：" + brief)
                     logger.info("搜索工具命中：%s", brief[:40])
+            except asyncio.TimeoutError:
+                logger.info("搜索超时（%.0fs），放弃注入直答", TOOL_TIMEOUT)
             except Exception as exc:
                 logger.warning("搜索查询异常（忽略）：%s", exc)
+        if vlm_task is not None and vision is not None:
+            try:
+                desc = await asyncio.wait_for(vlm_task, timeout=TOOL_TIMEOUT)
+                if desc:
+                    vision.raw["_vlm"] = desc
+                    logger.info("云端视觉描述：%s", desc[:40])
+            except asyncio.TimeoutError:
+                logger.info("云端视觉超时（%.0fs），无视觉提示直答", TOOL_TIMEOUT)
+            except Exception as exc:
+                logger.warning("云端视觉异常（忽略）：%s", exc)
         if briefs:
             ctx.tool_brief = "\n".join(briefs)
         if isinstance(emo_res, Exception):
@@ -248,12 +299,14 @@ class ConversationOrchestrator:
         transcript: Any | None = None,
         vision: VisionObservation | None = None,
         persist: bool = True,
+        on_notice: Any = None,
     ) -> TurnResult:
         """流式处理一轮对话。
 
         LLM token 级增量输出，每个增量回调 on_chunk(delta)（可为 async），
         调用方可边收边喂给 TTS 分句合成，实现"边生成边播放"。
         LLM 不支持流式或流式失败时自动回退非流式。
+        on_notice：工具查询启动时的"先应一声"回调（同 handle_turn）。
         """
         # 提醒/待办入口（与 handle_turn 一致：命中直接返回，不走 LLM）
         if self.reminders is not None:
@@ -287,35 +340,70 @@ class ConversationOrchestrator:
             except Exception as exc:
                 logger.debug("环境档案记录失败（忽略）：%s", exc)
 
-        # ---- 并行：情感分析 + 记忆检索 + 天气/搜索查询 ----
+        # ---- 并行：情感分析 + 记忆检索 + 意图路由 ----
         emo_task = asyncio.create_task(self.emotion_analyst.run(ctx))
         mem_task = asyncio.create_task(self.memory_expert.run(ctx))
+        route_task = asyncio.create_task(self._route_intent(user_text))
+        emo_res, mem_res, route = await asyncio.gather(
+            emo_task, mem_task, route_task, return_exceptions=True)
+        tool = (route or {}).get("tool", "none") \
+            if isinstance(route, dict) else "none"
+        query = (route or {}).get("query", "") if isinstance(route, dict) else ""
+        logger.info("意图路由：%s（%s）", tool, query[:30])
+
+        # 路由命中工具 → 先应一声（on_notice 异步播报，不阻塞查询）
+        if tool != "none" and on_notice is not None:
+            notice = {"weather": "等等哈，我看看天气……",
+                      "search": "等等哈，我查查……",
+                      "vision": "稍等，我看看……"}.get(tool)
+            if notice:
+                try:
+                    r = on_notice(notice)
+                    if asyncio.iscoroutine(r):
+                        asyncio.ensure_future(r)
+                except Exception:
+                    pass
+
         wx_task: asyncio.Task | None = None
         sr_task: asyncio.Task | None = None
-        if self.weather is not None and self.weather.detect(user_text):
+        vlm_task: asyncio.Task | None = None
+        if tool == "weather" and self.weather is not None:
             wx_task = asyncio.create_task(self.weather.fetch())
-        elif self.search is not None and self.search.detect(user_text):
-            # 关键词命中 → 便宜模型二次确认是否真需联网（与情感/记忆
-            # 并行跑，不增首响；'星期几/几点'这类被过滤，不再拉维基）
-            sr_task = asyncio.create_task(
-                self.search.smart_fetch(user_text, gate=self._search_gate))
-        emo_res, mem_res = await asyncio.gather(emo_task, mem_task,
-                                                return_exceptions=True)
+        elif tool == "search" and self.search is not None:
+            sr_task = asyncio.create_task(self.search.fetch(query or user_text))
+        elif tool == "vision" and vision is not None:
+            vlm_task = asyncio.create_task(self._vlm_describe(vision, query))
+
         briefs: list[str] = []
+        TOOL_TIMEOUT = 6.0
         if wx_task is not None:
             try:
-                brief = await wx_task
+                brief = await asyncio.wait_for(wx_task, timeout=TOOL_TIMEOUT)
                 if brief:
                     briefs.append(brief)
+            except asyncio.TimeoutError:
+                logger.info("天气查询超时（%.0fs），放弃注入直答", TOOL_TIMEOUT)
             except Exception as exc:
                 logger.warning("天气查询异常（忽略）：%s", exc)
         if sr_task is not None:
             try:
-                brief = await sr_task
+                brief = await asyncio.wait_for(sr_task, timeout=TOOL_TIMEOUT)
                 if brief:
                     briefs.append("联网查到的资料（可用可不用）：" + brief)
+            except asyncio.TimeoutError:
+                logger.info("搜索超时（%.0fs），放弃注入直答", TOOL_TIMEOUT)
             except Exception as exc:
                 logger.warning("搜索查询异常（忽略）：%s", exc)
+        if vlm_task is not None and vision is not None:
+            try:
+                desc = await asyncio.wait_for(vlm_task, timeout=TOOL_TIMEOUT)
+                if desc:
+                    vision.raw["_vlm"] = desc
+                    logger.info("云端视觉描述：%s", desc[:40])
+            except asyncio.TimeoutError:
+                logger.info("云端视觉超时（%.0fs），无视觉提示直答", TOOL_TIMEOUT)
+            except Exception as exc:
+                logger.warning("云端视觉异常（忽略）：%s", exc)
         if briefs:
             ctx.tool_brief = "\n".join(briefs)
         if isinstance(emo_res, Exception):
@@ -353,27 +441,83 @@ class ConversationOrchestrator:
     # 内部：回合准备 / 收尾
     # ------------------------------------------------------------------
 
-    async def _search_gate(self, text: str) -> bool:
-        """便宜模型确认是否真的需要联网搜索（关键词命中的二次过滤）。
+    async def _route_intent(self, text: str) -> dict:
+        """意图路由：便宜模型判断这条消息需要什么外部能力。
 
-        皮皮自己能答的不搜：当前时间/日期、闲聊寒暄、情感表达、关于
-        皮皮自己的问题。分类失败 → 返回 True（保守照搜，宁多勿漏）。
+        取代关键词过滤 —— 中文问法是开放集，词表永远补不全。
+        超时/失败 → none（直答，宁缺勿滥：误触发工具的代价是
+        白等数秒+无关信息注入）。
         """
+        system = (
+            "你是陪伴机器人皮皮的意图路由器。判断用户消息需要什么外部能力：\n"
+            '- weather：天气/气温/降雨/穿衣参考（需要真实天气数据）\n'
+            '- search：外部事实、百科、新闻、人物地点历史事件（皮皮不知道的）\n'
+            '- vision：需要看摄像头画面才能回答（画面里的人/物/穿着/表情，'
+            '或用户问皮皮能不能看见、看到了什么）\n'
+            '- none：闲聊、情感表达、时间日期、关于皮皮自己的状态与能力、'
+            '对皮皮的请求与指令、皮皮自己能答的问题\n'
+            "只输出一行 JSON，不要解释：\n"
+            '{"tool": "weather|search|vision|none", "query": "..."}\n'
+            "query 规则：search 时给关键词化的搜索词；vision 时给观察要点"
+            "（用户的问题）；其余填空字符串。\n"
+            "示例：\n"
+            '今天天气怎么样 → {"tool": "weather", "query": ""}\n'
+            '秦始皇哪年统一六国 → {"tool": "search", "query": "秦始皇 统一六国 年份"}\n'
+            '你能看见我吗 → {"tool": "vision", "query": "用户是否在画面中"}\n'
+            '我穿这件衣服好看吗 → {"tool": "vision", "query": "用户穿着"}\n'
+            '现在几点了 → {"tool": "none", "query": ""}\n'
+            '那你在干什么呀 → {"tool": "none", "query": ""}\n'
+            '你不能看家吗 → {"tool": "none", "query": ""}\n'
+            '我很难过 → {"tool": "none", "query": ""}'
+        )
         try:
-            messages = [
-                {"role": "system",
-                 "content": "判断用户消息是否需要联网搜索外部/百科信息才能回答。"
-                            "皮皮自己知道的：当前时间与日期、闲聊寒暄、情感"
-                            "表达、关于皮皮自己的一切。只输出 JSON，不要解释："
-                            '{"need": true} 或 {"need": false}'},
-                {"role": "user", "content": text},
-            ]
-            resp = await self.llm.chat(messages, temperature=0.1,
-                                       max_tokens=20, use_cheap=True)
-            txt = (getattr(resp, "text", "") or "").replace(" ", "").lower()
-            return '"need":true' in txt
-        except Exception:
-            return True
+            resp = await asyncio.wait_for(
+                self.llm.chat([{"role": "system", "content": system},
+                               {"role": "user", "content": text}],
+                              temperature=0.1, max_tokens=60, use_cheap=True),
+                timeout=3.0)
+            txt = (getattr(resp, "text", "") or "").strip()
+            m = re.search(r"\{[^{}]*\}", txt, re.S)
+            if not m:
+                return {"tool": "none", "query": ""}
+            import json as _json
+            data = _json.loads(m.group(0))
+            tool = str(data.get("tool", "none")).lower()
+            if tool not in ("weather", "search", "vision", "none"):
+                tool = "none"
+            return {"tool": tool, "query": str(data.get("query", ""))}
+        except Exception as exc:
+            logger.info("意图路由失败（直答）：%s", exc)
+            return {"tool": "none", "query": ""}
+
+    async def _vlm_describe(self, obs: VisionObservation,
+                            question: str) -> str | None:
+        """云端多模态识别：把预编码的当前画面发给视觉模型换回描述。"""
+        b64 = (obs.raw or {}).get("_jpeg")
+        if not b64:
+            return None
+        llm = self.llm
+        vlm_model = (self.cfg_snapshot or {}).get("vision", {}).get("vlm_model", "")
+        if vlm_model and vlm_model != getattr(llm, "model", ""):
+            from pipi.providers.llm.openai_compat import OpenAICompatLLM
+            llm = OpenAICompatLLM(
+                base_url=llm.base_url, api_key=llm.api_key,
+                model=vlm_model, name="vlm",
+                extra_body=getattr(llm, "extra_body", None),
+                timeout_s=getattr(llm, "timeout_s", 30))
+        messages = [
+            {"role": "system",
+             "content": "你是机器人皮皮的眼睛。用中文客观描述画面："
+                        "有几个人、衣着颜色、表情与姿态。不要寒暄，"
+                        "不超过 60 字。"},
+            {"role": "user", "content": [
+                {"type": "text",
+                 "text": question or "描述你现在看到的画面"},
+                {"type": "image_url", "image_url": {"url": b64}},
+            ]},
+        ]
+        resp = await llm.chat(messages, temperature=0.3, max_tokens=120)
+        return (getattr(resp, "text", "") or "").strip() or None
 
     def _prepare_context(self, user_id: str, user_text: str, *,
                          transcript: Any | None = None,
