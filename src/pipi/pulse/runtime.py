@@ -76,6 +76,8 @@ class PulseRuntime:
 
     def __init__(self, cfg: Any, *, session: Any = None,
                  vision: Any | None = None,
+                 motion: Any | None = None,
+                 weather: Any | None = None,
                  loop: LivingLoop | None = None,
                  clock: Any = None,
                  mono: Any = None):
@@ -83,6 +85,13 @@ class PulseRuntime:
         self.cfg = p_cfg
         self.session = session
         self.vision = vision
+        self.motion = motion          # 人脸跟随（云台 LOOK_AT）用
+        # 真实天气源（WeatherService）：周期拉取 + 订阅对话查询触发 → 心境同步
+        self.weather = weather
+        self.weather_sync_s = float((cfg or {}).get("weather", {})
+                                    .get("sync_interval_s", 1800.0))
+        self._last_weather_kind: str | None = None
+        self._weather_ext = ""        # 外面天气（中文），供快照/内心注入
         self.clock = clock or _LocalClock()
         # 单调时钟（发声冷却/人声节流）：真实系统用 time.monotonic，
         # 仿真可注入（验证时按仿真时间推进，避免"永远在冷却"）
@@ -135,6 +144,15 @@ class PulseRuntime:
             asyncio.create_task(self._pulse_loop(), name="pulse-beat"),
             asyncio.create_task(self._monitor_flush_loop(), name="pulse-monitor"),
         ]
+        # 真实天气 → 心境：周期同步 + 对话查询触发（类别变化才调制）
+        if self.weather is not None:
+            self._tasks.append(asyncio.create_task(
+                self._weather_sync_loop(), name="pulse-weather"))
+            try:
+                self.weather.subscribe(self._on_weather_change)
+            except Exception as exc:
+                logger.debug("天气订阅失败（周期同步仍可用）：%s", exc)
+            self._sync_weather()   # 启动即同步一次（首次必然触发）
         # 感知循环（vision 注入且启用时）：事件 → inject
         if self.vision is not None:
             try:
@@ -151,6 +169,17 @@ class PulseRuntime:
                 logger.info("感知循环已启动（PULSE 视觉接入）")
             except Exception as exc:
                 logger.info("感知循环不可用（%s）", exc)
+        # 人脸跟随：检测到人脸且偏离画面中心 → 云台 LOOK_AT
+        v_cfg = (getattr(self, "_full_cfg", None) or {}).get("vision", {}) or {}
+        if (self.motion is not None and v_cfg.get("follow", True)
+                and self.vision is not None):
+            self._follow_deadzone = float(v_cfg.get("follow_deadzone", 0.12))
+            self._follow_cooldown = float(v_cfg.get("follow_cooldown_s", 2.0))
+            self._last_follow_t = 0.0
+            self._tasks.append(asyncio.create_task(
+                self._follow_loop(), name="face-follow"))
+            logger.info("人脸跟随已启动（deadzone=%.2f, cooldown=%.1fs）",
+                        self._follow_deadzone, self._follow_cooldown)
         logger.info("PULSE 心搏启动（tick=%.1fs）", self.tick_s)
 
     def bind_cfg(self, full_cfg: Any) -> None:
@@ -167,6 +196,36 @@ class PulseRuntime:
         perc = getattr(self, "_perception", None)
         return perc.latest if perc is not None else None
 
+    async def _follow_loop(self) -> None:
+        """人脸跟随：最新帧里取最大人脸，偏离画面中心超死区 → 云台 LOOK_AT。"""
+        W, H = 640, 480   # 与 OpenCVCamera 输出一致
+        while self._running:
+            await asyncio.sleep(0.4)
+            try:
+                perc = getattr(self, "_perception", None)
+                obs = perc.latest if perc is not None else None
+                if obs is None or not obs.faces:
+                    continue
+                face = max(obs.faces,
+                           key=lambda f: (f.bbox.w or 0) * (f.bbox.h or 0))
+                b = face.bbox
+                dx = (b.x + b.w / 2) / W - 0.5
+                dy = (b.y + b.h / 2) / H - 0.5
+                if abs(dx) <= self._follow_deadzone and \
+                        abs(dy) <= self._follow_deadzone:
+                    continue
+                now = self._mono()
+                if now - self._last_follow_t < self._follow_cooldown:
+                    continue
+                self._last_follow_t = now
+                await self.motion.execute_gesture(
+                    Gesture.LOOK_AT, target=(int(b.x + b.w / 2),
+                                             int(b.y + b.h / 2)))
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.debug("人脸跟随失败：%s", exc)
+
     async def stop(self) -> None:
         self._running = False
         if getattr(self, "_perception", None) is not None:
@@ -174,7 +233,7 @@ class PulseRuntime:
                 await self._perception.stop()
             except Exception:
                 pass
-            self._perception = None
+        self._perception = None
         for t in self._tasks:
             t.cancel()
         await asyncio.gather(*self._tasks, return_exceptions=True)
@@ -235,6 +294,9 @@ class PulseRuntime:
         sleeping = self.loop.is_sleeping(hour)
         sim = self.loop.sim_seconds
         lines = [f'- 心境天气：{s["weather"]["label"]}']
+        if self._weather_ext:
+            lines.append(f"- 外面{self._weather_ext}"
+                         "（这影响着你的心情：阴雨更蔫、晴天更有精神）")
 
         # 睡眠 / 刚被叫醒
         if sleeping:
@@ -272,6 +334,41 @@ class PulseRuntime:
 
         return ("你此刻真实的身心状态（你的语气、用词、内容必须和它一致，"
                 "不能和它矛盾）：\n" + "\n".join(lines))
+
+    # ------------------------------------------------------------------
+    # 真实天气 → 心境同步（WeatherService → loop.observe_weather）
+    # ------------------------------------------------------------------
+
+    async def _weather_sync_loop(self) -> None:
+        """周期拉取真实天气类别并同步（默认 30min；类别变化才调制心境）。"""
+        while self._running:
+            try:
+                self._sync_weather()
+            except Exception as exc:
+                logger.debug("天气周期同步失败：%s", exc)
+            await asyncio.sleep(max(self.weather_sync_s, 60.0))
+
+    def _on_weather_change(self, kind: str) -> None:
+        """对话查询天气成功后由 WeatherService 触发（同线程，直接同步）。"""
+        try:
+            self._sync_weather()
+        except Exception as exc:
+            logger.debug("天气订阅同步失败：%s", exc)
+
+    def _sync_weather(self) -> None:
+        """拉当前类别，与上次不同才注入 loop + 留事件日志。"""
+        get_kind = getattr(self.weather, "kind", None)
+        if get_kind is None:
+            return
+        kind = get_kind()
+        if not kind or kind == self._last_weather_kind:
+            return
+        self._last_weather_kind = kind
+        from pipi.capabilities.weather import KIND_ZH
+        zh = KIND_ZH.get(kind, kind)
+        self._weather_ext = zh
+        text = self.loop.observe_weather(kind)
+        self._event_log("weather", f"外面{zh}" + (f" · {text}" if text else ""))
 
     # ------------------------------------------------------------------
     # 视觉感知注入（PerceptionLoop → inject）
@@ -446,8 +543,7 @@ class PulseRuntime:
         from pipi.pulse.organs.will import REASON
         if intent.kind == "useless":
             return f"没什么要紧事，{intent.action or '发一会儿呆'}"
-        r = REASON.get(intent.kind, "")
-        return f"想{r}（{intent.kind}）" if r else intent.kind
+        return REASON.get(intent.kind, intent.kind)
 
     # ------------------------------------------------------------------
     # 监控快照（monitor 兼容结构 + PULSE 专属字段）
@@ -506,7 +602,7 @@ class PulseRuntime:
                             + (f" · {sess_phase_zh(sess_phase)}"
                                if sess_phase else "")
                             + f" · 天气{weather_label} · 呼吸 "
-                            f"{s['breath']['rate']:.0f}bpm · "
+                            f"{s['breath']['rate']:.0f}次/分 · "
                             f"信任 {s['trust']} · 自我深度 {s['self_depth']}"),
             },
             "activity": {
@@ -524,6 +620,7 @@ class PulseRuntime:
                 "struggle": s["struggle"],
                 "weather": {"base": weather, "pulse": s["weather"]["pulse"],
                             "label": weather_label},
+                "weather_ext": self._weather_ext,
                 "trust": s["trust"],
                 "self_depth": s["self_depth"],
                 "owner_present": s["owner_present"],

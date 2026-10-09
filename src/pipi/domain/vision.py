@@ -139,6 +139,11 @@ class VisionObservation:
         """
         parts: list[str] = []
 
+        # 云端多模态识别结果优先（本地只做检测/跟随，复杂理解上云）
+        vlm = (self.raw or {}).get("_vlm")
+        if vlm:
+            return "[你看到的] " + str(vlm)
+
         if self.owner_newly_arrived:
             parts.append(f"{owner_name}刚回来了")
         elif self.owner_present:

@@ -23,6 +23,7 @@ user:
 weather:
   enabled: true
   city: "济南"              # 部署城市（可改，如 "北京"）
+  sync_interval_s: 1800    # 真实天气 → 生命模块：周期同步间隔（类别变化才调心境）
 
 # ---------------- 人格 ----------------
 persona:
@@ -297,20 +298,30 @@ vision:
   enabled: true                # false 则关闭摄像头（隐私优先）
   camera_index: 0
   fps: 1.5                     # 感知采样帧率（不需要高帧率）
-  # 四个子能力可独立降级
+  # 能力分配：本地只做轻量检测 + 跟随，复杂理解交给云端多模态 LLM
   capabilities:
-    detect: true               # 人脸检测（基础，几乎总能开）
-    recognize: true            # 人脸识别（认主）
-    expression: true           # 表情识别
-    clothing: true             # 衣着颜色
+    detect: true               # 人脸检测（本地 YuNet，预下载模型）
+    follow: true               # 人脸跟随（检测到人脸 → 云台 LOOK_AT 转向）
+    recognize: false           # 认主 → 声纹识别已覆盖；视觉理解走云端
+    expression: false          # 表情 → 云端传图识别
+    clothing: false            # 衣着 → 云端传图识别
   detector: "yunet"            # yunet | mediapipe
   detector_model: "data/models/face_detection_yunet_2023mar.onnx"
   recognizer: "insightface"    # insightface | none
+  # 人脸跟随（本地）：人脸偏离画面中心超死区 → 云台转向，cooldown 节流
+  follow_deadzone: 0.12        # 归一化偏移死区（0~0.5）
+  follow_cooldown_s: 2.0       # 两次转向的最小间隔
+  # 云端传图识别（多模态 LLM）：对话提到视觉相关内容时，把当前画面
+  # 连同问题一起发给模型（走 llm 的接入点，需该端点支持图片输入）
+  vlm: true
   # 监控页画面推流（JPEG 经 WS 到 web/monitor.html；只推流不落盘）
   monitor_stream: true
   monitor_fps: 0.5
   expression_model: "hsemotion" # hsemotion | fer | none
   face_match_threshold: 0.45   # 人脸比对的余弦阈值
+  # 在场判定宽限（秒）：漏检一两帧（低头/侧脸）不算"主人离开"，
+  # 防止 owner_present 帧间抖动让 LLM 反复说"你站那么远，过来点"
+  presence_grace_s: 6.0
   enroll_dir: "data/faces"     # 主人照片目录
   # 隐私
   privacy:

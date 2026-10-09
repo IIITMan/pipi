@@ -6,6 +6,7 @@ import logging
 from typing import Any
 
 from pipi.providers.vision.base import VisionProvider
+
 from pipi.providers.vision.clothing import ColorClothingAnalyzer
 from pipi.providers.vision.detector import (
     InsightFaceRecognizer,
@@ -109,6 +110,7 @@ def create_vision(cfg: Any) -> VisionProvider | None:
         camera,
         detector=detector, recognizer=recognizer,
         expression=expression, clothing=clothing,
+        presence_grace_s=float(cfg.get("vision.presence_grace_s", 5.0)),
     )
 
 

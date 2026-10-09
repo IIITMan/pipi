@@ -35,6 +35,7 @@ class VisionPipeline:
         expression: Any | None = None,
         clothing: Any | None = None,
         owner_person_id: str = "owner",
+        presence_grace_s: float = 5.0,
     ):
         self.camera = camera
         self.detector = detector
@@ -42,6 +43,9 @@ class VisionPipeline:
         self.expression = expression
         self.clothing = clothing or ColorClothingAnalyzer()
         self.owner_person_id = owner_person_id
+        # 在场判定宽限：漏检一两帧（低头/侧脸/光线）不算离开，
+        # 否则 owner_present 帧间抖动会让 LLM 反复脑补"主人站远了"
+        self.presence_grace_s = max(0.0, float(presence_grace_s))
 
         self._frame_id = 0
         self._prev_owner_present = False
@@ -100,6 +104,9 @@ class VisionPipeline:
 
         # ---- 2. 逐脸识别 ----
         owner_present = False
+        # 本地未开 recognize 时：检测到人脸即视为在座（单主人场景；
+        # 真实身份由声纹识别/云端传图判定）
+        no_recognize = "recognize" not in caps and boxes
         for box in boxes:
             face = FaceObservation(bbox=box)
 
@@ -134,18 +141,23 @@ class VisionPipeline:
                 except Exception as exc:
                     logger.debug("衣着失败：%s", exc)
 
-        # ---- 5. 帧间对比：算出"刚回来" ----
-        obs.owner_present = owner_present
-        if owner_present and not self._prev_owner_present:
-            obs.owner_newly_arrived = True
-            logger.info("检测到主人出现")
-        elif not owner_present and self._prev_owner_present:
-            obs.owner_just_left = True
-            logger.info("检测到主人离开")
-
+        # ---- 5. 帧间对比：算出"刚回来"/"刚离开"（带宽限去抖）----
+        if no_recognize:
+            owner_present = True
         if owner_present:
             self._last_owner_seen_at = now
-        self._prev_owner_present = owner_present
+        # 宽限期内漏检仍算在场
+        effective = owner_present or \
+            (now - self._last_owner_seen_at) <= self.presence_grace_s
+        obs.owner_present = effective
+        if effective and not self._prev_owner_present:
+            obs.owner_newly_arrived = True
+            logger.info("检测到主人出现")
+        elif not effective and self._prev_owner_present:
+            obs.owner_just_left = True
+            logger.info("检测到主人离开（含 %.0fs 宽限）", self.presence_grace_s)
+
+        self._prev_owner_present = effective
 
         return obs
 

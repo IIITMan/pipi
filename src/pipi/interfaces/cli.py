@@ -245,6 +245,8 @@ class CLI:
             cfg=self.app.cfg,
             session=self._session,
             vision=getattr(self.app, "vision", None),
+            motion=getattr(self.app, "motion", None),
+            weather=getattr(self.orch, "weather", None),
         )
         rt.bind_cfg(self.app.cfg)
         # 提醒触发 → 记入当天日记（生命流留痕）
@@ -403,6 +405,61 @@ class CLI:
         except Exception:
             return None
 
+    _VLM_HINT_WORDS = ("看见", "看到", "穿", "颜色", "表情", "长什么样",
+                       "什么样", "认得", "认出", "看起来", "几", "谁")
+
+    def _looks_visual(self, text: str) -> bool:
+        return any(k in text for k in self._VLM_HINT_WORDS)
+
+    async def _cloud_describe(self, question: str) -> str | None:
+        """把当前画面传给多模态 LLM，换回一句客观描述（复杂视觉理解上云）。"""
+        vision = getattr(self.app, "vision", None)
+        if vision is None or type(vision).__name__ != "VisionPipeline":
+            return None
+        try:
+            import base64
+
+            import cv2
+            frame = await vision.camera.read()
+            if frame is None:
+                return None
+            ok, buf = cv2.imencode(
+                ".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+            if not ok:
+                return None
+            data_url = "data:image/jpeg;base64," + base64.b64encode(buf).decode()
+            messages = [
+                {"role": "system",
+                 "content": "你是机器人皮皮的眼睛。用中文客观描述画面："
+                            "有几个人、衣着颜色、表情与姿态。不要寒暄，"
+                            "不超过 60 字。"},
+                {"role": "user", "content": [
+                    {"type": "text",
+                     "text": question or "描述你现在看到的画面"},
+                    {"type": "image_url", "image_url": {"url": data_url}},
+                ]},
+            ]
+            resp = await self.app.llm.chat(messages, temperature=0.3,
+                                           max_tokens=120)
+            text = getattr(resp, "text", "") or ""
+            return text.strip() or None
+        except Exception as exc:
+            logger.debug("云端视觉识别失败：%s", exc)
+            return None
+
+    async def _vision_for_turn(self, text: str):
+        """对话用观测：本地检测 + 可选云端视觉理解（写入 obs.raw['_vlm']）。"""
+        obs = await self._current_vision()
+        if (obs is not None and obs.faces
+                and self.app.cfg.get("vision.vlm", True)
+                and self._looks_visual(text)):
+            desc = await self._cloud_describe(text)
+            if desc:
+                obs.raw["_vlm"] = desc
+                if self.verbose:
+                    print(f"  [云端视觉] {desc}", flush=True)
+        return obs
+
     async def _respond_stream(self, text: str) -> None:
         """应答：LLM 流式 → 逐字显示 + 分句 TTS 边生成边播放。"""
         import time as _time
@@ -449,6 +506,7 @@ class CLI:
             self._speaker = speaker
 
         state = {"printed": False, "ttfb_ms": 0}
+        obs = await self._vision_for_turn(text)
 
         async def on_chunk(delta: str) -> None:
             if not state["printed"]:
@@ -461,7 +519,7 @@ class CLI:
 
         result = await self.orch.handle_turn_stream(
             self._active_uid, text, on_chunk=on_chunk,
-            vision=await self._current_vision())
+            vision=obs)
         if state["printed"]:
             print(flush=True)
         else:
@@ -509,7 +567,7 @@ class CLI:
             if self._life is not None:
                 self._life.log_chat("user", text)
             result = await self.orch.handle_turn_stream(
-                self.user_id, text, vision=await self._current_vision())
+                self.user_id, text, vision=await self._vision_for_turn(text))
             if self._life is not None:
                 for b in result.bubbles:
                     self._life.log_chat("pipi", b.text)
@@ -519,8 +577,8 @@ class CLI:
 
     async def _say(self, text: str) -> None:
         self.app.proactive_engine.note_user_response(self.app.clock.now())
-        result = await self.orch.handle_turn(self.user_id, text,
-                                             vision=await self._current_vision())
+        result = await self.orch.handle_turn(
+            self.user_id, text, vision=await self._vision_for_turn(text))
 
         for b in result.bubbles:
             print(f"皮皮 > {b.text}")
