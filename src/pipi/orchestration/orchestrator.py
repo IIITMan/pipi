@@ -366,21 +366,17 @@ class ConversationOrchestrator:
                     ctx.tool_brief = "联网查到的资料（可用可不用）：" + brief
                     logger.info("搜索工具命中：%s", brief[:40])
             elif tool == "vision" and vision_obs is not None:
-                # 视觉识别偶尔超时/空响应：重试一次（共 ~12s 预算）
+                # 单次 6s 预算：超时/失败直接降级本地视觉提示，不重试 ——
+                # 重试会把首响拖到 12s+，得不偿失（2026-10 实测）
                 desc = None
-                for i in range(2):
-                    try:
-                        desc = await asyncio.wait_for(
-                            self._vlm_describe(vision_obs, query or user_text),
-                            timeout=6.0)
-                    except asyncio.TimeoutError:
-                        print("  👁 （视觉识别超时，重试…）" if i == 0 else
-                              "  👁 （视觉识别超时，先用眼睛凑合看）", flush=True)
-                        continue
-                    except Exception as exc:
-                        print(f"  👁 （视觉识别异常：{exc}）", flush=True)
-                    if desc:
-                        break
+                try:
+                    desc = await asyncio.wait_for(
+                        self._vlm_describe(vision_obs, query or user_text),
+                        timeout=6.0)
+                except asyncio.TimeoutError:
+                    print("  👁 （云端识别超时，先用本地视觉凑合）", flush=True)
+                except Exception as exc:
+                    print(f"  👁 （视觉识别异常：{exc}）", flush=True)
                 if desc:
                     vision_obs.raw["_vlm"] = desc
                     print(f"  👁 看到的是：{desc}", flush=True)

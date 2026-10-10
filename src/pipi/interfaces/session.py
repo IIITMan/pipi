@@ -372,13 +372,10 @@ class InteractionSession:
     # -- 语音退出 ------------------------------------------------------
 
     def _is_exit_intent(self, text: str) -> bool:
-        """判断是否退出意图（短语子串匹配，限短句防误触）。"""
+        """判断是否退出意图（短语子串匹配，限短句防误触）。静默判定。"""
         if not text or len(text) > 15:
             return False
-        hit = any(p in text for p in self.exit_phrases)
-        if self.verbose:
-            print(f"  [exit-check] {text!r} → {hit}")
-        return hit
+        return any(p in text for p in self.exit_phrases)
 
     def _start_farewell(self) -> None:
         """播一句告别 → 播完自动回待机（期间可被 Barge-in 打断）。"""
@@ -558,15 +555,15 @@ class InteractionSession:
         self._notify(f"  {text or '(空)'}")
         self._identify_speaker(audio)
 
-        # 唤醒段里的退出意图（「皮皮，退下吧」）
-        if self._is_exit_intent(text):
-            self._notify("  退出对话，回待机")
-            self._start_farewell()
-            return
-
-        # KWS 已在声学层命中，ASR 文本只用来剥离唤醒词拿正文
+        # KWS 已在声学层命中，ASR 文本只用来剥离唤醒词拿正文；
+        # 退出检测只针对正文（唤醒词「皮皮」本身不再跑检测）
         _hit, rest = match_wake(text, self.wake_words)
         if rest:
+            # 带需求唤醒：「皮皮，退下吧」这类正文含退出意图
+            if self._is_exit_intent(rest):
+                self._notify("  退出对话，回待机")
+                self._start_farewell()
+                return
             self._notify("  已唤醒（带需求）")
             self.state = self.RESPOND
             self._resp_started = time.monotonic()

@@ -418,12 +418,14 @@ class CLI:
         orchestrator._vlm_describe 使用 raw['_jpeg']）。"""
         obs = await self._current_vision()
         if obs is not None:
-            # 本地视觉识别结果上控制台（人脸数/在场判定/能看到的提示）
+            # 本地视觉结果仅在状态变化时打印（人来/人走/人数变），不逐轮刷屏
             try:
-                hint = obs.to_hint("主人") or ""
-                print(f"  👁 本地视觉：人脸×{obs.person_count} · "
-                      f"{'主人在屋' if obs.owner_present else '主人不在'}"
-                      + (f" · {hint}" if hint else ""), flush=True)
+                sig = (obs.person_count, obs.owner_present)
+                if sig != getattr(self, "_last_vis_sig", None):
+                    self._last_vis_sig = sig
+                    print(f"  👁 视觉：人脸×{obs.person_count} · "
+                          f"{'主人在屋' if obs.owner_present else '主人不在'}",
+                          flush=True)
             except Exception:
                 pass
         if obs is not None and not obs.raw.get("_jpeg"):
@@ -432,9 +434,7 @@ class CLI:
 
                 import cv2
                 frame = obs.raw.get("_frame")
-                if frame is None:
-                    print("  👁 （编码跳过：观测未携带原帧）", flush=True)
-                else:
+                if frame is not None:
                     ok, buf = cv2.imencode(
                         ".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
                     if ok:
@@ -483,17 +483,19 @@ class CLI:
         if not self._vp.enrolled and getattr(self._vp, "_enroll_buf", None):
             print(f"  声纹登记中 {len(self._vp._enroll_buf)}/"
                   f"{self._vp.enroll_target}（再说几句完成建档）", flush=True)
-        if self.verbose and getattr(self._vp, "last_sim", None) is not None:
-            print(f"  声纹相似度 {self._vp.last_sim:.2f}", flush=True)
+        sim = getattr(self._vp, "last_sim", None)
         if uid and uid != self._last_uid:
+            # 身份变化：相似度与判定合并一行
             if uid == "owner":
-                print("  已登记声纹：你就是主人" if not self._last_uid
-                      else "  主人", flush=True)
+                print(f"  （声纹 {sim:.2f} · 主人）" if sim is not None
+                      else "  （主人）", flush=True)
             elif uid == "stranger":
-                print("  你是陌生人吧？我们先认识一下", flush=True)
+                print("  （陌生人）你是陌生人吧？我们先认识一下", flush=True)
             self._last_uid = uid
             if self._reminders is not None:
                 self._reminders.active_uid = uid   # 面板展示谁的待办
+        elif self.verbose and sim is not None:
+            print(f"  （声纹 {sim:.2f}）", flush=True)
         return uid
 
     async def _respond_stream_locked(self, text: str) -> None:
@@ -554,16 +556,6 @@ class CLI:
                 self._life.physio.observe_dialogue_mood(
                     result.emotion_state.mood.value)
 
-        if self.verbose:
-            llm = getattr(self.app.llm, "last_latency_ms", 0)
-            s = self._session
-            print(f"  语音 {s.last_utt_s:.1f}s → ASR {s.last_asr_ms}ms"
-                  f" → 首响 {state['ttfb_ms']}ms"
-                  f" → 编排完成 {result.latency_ms}ms"
-                  f"{' [降级]' if result.degraded else ''}", flush=True)
-            print(f"     记忆召回 {len(result.memories_used)} 条（写入异步落库中…）",
-                  flush=True)
-
         if speaker is not None:
             await speaker.finish()
             self._speaker = None
@@ -571,8 +563,11 @@ class CLI:
             await self.orch.speak(result.bubbles)
         if self.verbose:
             total = (_time.perf_counter() - t0) * 1000
-            print(f"  说话→回完 {total:.0f}ms ｜ 记忆已写入 "
-                  f"{len(result.memories_written)} 条", flush=True)
+            print(f"  ⏱ 首响 {state['ttfb_ms'] / 1000:.1f}s"
+                  f" ｜ 回完 {total / 1000:.1f}s"
+                  f" ｜ 记忆 召回{len(result.memories_used)}"
+                  f"/写入{len(result.memories_written)}"
+                  f"{' ｜ [降级]' if result.degraded else ''}", flush=True)
 
     async def _on_remote_chat(self, text: str) -> None:
         """远程文本聊天（静态监控页发来）：与语音共享记忆，语音优先。"""

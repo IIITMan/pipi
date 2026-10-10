@@ -144,7 +144,7 @@ class SearchService:
                + "&setlang=zh-hans&mkt=zh-CN")
         try:
             html = await asyncio.to_thread(
-                self._get_text, url, 8.0, _UA_BROWSER)
+                self._get_text, url, 5.0, _UA_BROWSER)
         except Exception as exc:
             logger.warning("Bing 搜索失败（%s）：%s", query[:20], exc)
             return None
