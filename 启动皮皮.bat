@@ -1,33 +1,29 @@
-@echo off
-chcp 65001 >nul
-title çš®çš® Â· æƒ…æ„Ÿé™ªä¼´æœºå™¨äºº
-cd /d "%~dp0"
-
-REM ---- å•å®ä¾‹ä¿æŠ¤ï¼šç›‘æ§ç«¯å£ 8848 å·²è¢«ç›‘å¬ = çš®çš®å·²åœ¨è¿è¡Œ ----
-netstat -ano | findstr ":8848 " | findstr "LISTENING" >nul
-if %errorlevel%==0 (
-    echo [æç¤º] çš®çš®å¥½åƒå·²ç»åœ¨è¿è¡Œäº†ï¼ˆç«¯å£ 8848 å·²è¢«å ç”¨ï¼‰ã€‚
-    echo.
-    echo        å¦‚æœæ‰¾ä¸åˆ°å®ƒçš„çª—å£ï¼Œå¯èƒ½æ˜¯è¿›ç¨‹é©»ç•™åœ¨äº†åå°ã€‚
-    echo        ç»“æŸæ—§å®ä¾‹è¯·è¿è¡Œ:  taskkill /f /im python.exe
-    echo        ï¼ˆæˆ–åˆ°ä»»åŠ¡ç®¡ç†å™¨ç»“æŸ python.exeï¼‰
-    echo.
-    pause
-    exit /b 1
-)
-
-if not exist ".venv\Scripts\python.exe" (
-    echo [é”™è¯¯] æ‰¾ä¸åˆ° .venv è™šæ‹Ÿç¯å¢ƒ â€”â€” å…ˆæ‰§è¡Œä¸€æ¬¡ï¼š
-    echo     python -m venv .venv
-    echo     .venv\Scripts\python -m pip install -e ".[llm]" -e ".[monitor]"
-    pause
-    exit /b 1
-)
-
-REM å‚æ•°é€ä¼ ï¼šé»˜è®¤å…æè¯­éŸ³æ¨¡å¼ï¼›æƒ³ç”¨æ–‡æœ¬æ¨¡å¼æ”¹æˆ run.py å³å¯
-".venv\Scripts\python.exe" run.py --voice %*
-
-echo.
-echo [çš®çš®å·²é€€å‡º] ä¸Šæ–¹è‹¥æ— æŠ¥é”™ï¼Œå±æ­£å¸¸é€€å‡ºï¼ˆCtrl+C æˆ–å‘Šåˆ«è¯­å¥ï¼‰ã€‚
-echo              è‹¥æœ‰ Tracebackï¼ŒæŠŠæœ€åå‡ è¡Œæˆªå›¾å‘ç»™åŠ©æ‰‹æ’æŸ¥ã€‚
-pause
+@echo off
+title Æ¤Æ¤ ¡¤ Çé¸ĞÅã°é»úÆ÷ÈË
+cd /d "%~dp0"
+
+REM ---- µ¥ÊµÀı±£»¤£º¼à¿Ø¶Ë¿Ú 8848 ÒÑ±»¼àÌı = Æ¤Æ¤ÒÑÔÚÔËĞĞ ----
+netstat -ano | findstr ":8848 " | findstr "LISTENING" >nul
+if %errorlevel%==0 (
+    echo [ÌáÊ¾] Æ¤Æ¤ºÃÏñÒÑ¾­ÔÚÔËĞĞÁË£¨¶Ë¿Ú 8848 ÒÑ±»Õ¼ÓÃ£©¡£
+    echo.
+    echo        Èç¹ûÕÒ²»µ½ËüµÄ´°¿Ú£¬¿ÉÄÜÊÇ½ø³Ì×¤ÁôÔÚÁËºóÌ¨¡£
+    echo        ½áÊø¾ÉÊµÀıÇëÔËĞĞ:  taskkill /f /im python.exe
+    echo.
+    pause
+    exit /b 1
+)
+
+if not exist ".venv\Scripts\python.exe" (
+    echo [´íÎó] ÕÒ²»µ½ .venv ĞéÄâ»·¾³¡£
+    pause
+    exit /b 1
+)
+
+REM ²ÎÊıÍ¸´«£ºÄ¬ÈÏÃâÌáÓïÒôÄ£Ê½£»ÏëÓÃÎÄ±¾Ä£Ê½¸Ä³É run.py ¼´¿É
+".venv\Scripts\python.exe" run.py --voice %*
+
+echo.
+echo [Æ¤Æ¤ÒÑÍË³ö] ÉÏ·½ÈôÎŞ±¨´í£¬ÊôÕı³£ÍË³ö£¨Ctrl+C »ò¸æ±ğÓï¾ä£©¡£
+echo              ÈôÓĞ Traceback£¬°Ñ×îºó¼¸ĞĞ½ØÍ¼·¢¸øÖúÊÖÅÅ²é¡£
+pause

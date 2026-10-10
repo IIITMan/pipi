@@ -73,7 +73,13 @@ class OpenAICompatLLM:
             **self.extra_body,
         }
         start = time.time()
-        data = await self._post("/chat/completions", payload)
+        try:
+            data = await self._post("/chat/completions", payload)
+        except Exception as exc:
+            _log_llm({"api": "chat", "model": payload["model"],
+                      "latency_ms": int((time.time() - start) * 1000),
+                      "request": payload, "error": str(exc)})
+            raise
         latency = int((time.time() - start) * 1000)
         self.last_latency_ms = latency
         self.calls += 1
@@ -82,6 +88,10 @@ class OpenAICompatLLM:
         choice = (data.get("choices") or [{}])[0]
         msg = choice.get("message") or {}
         usage = data.get("usage") or {}
+        _log_llm({"api": "chat", "model": payload["model"],   # 配置名（ep），非服务端解析名
+                  "latency_ms": latency, "request": payload,
+                  "response_raw": data,
+                  "text": (msg.get("content") or "").strip()})
         return LLMResponse(
             text=(msg.get("content") or "").strip(),
             model=data.get("model", payload["model"]),
@@ -173,19 +183,35 @@ class OpenAICompatLLM:
         got_any = False
         error: Exception | None = None
         start = time.time()
+        full_text = ""
+        n_chunks = 0
+        ttfb_ms = 0
         while True:
             kind, item = await queue.get()
             if kind == "delta":
                 if not got_any:
                     got_any = True
-                    self.last_latency_ms = int((time.time() - start) * 1000)
+                    ttfb_ms = int((time.time() - start) * 1000)
+                    self.last_latency_ms = ttfb_ms
                     self.calls += 1
-                    self.total_ms += self.last_latency_ms
+                    self.total_ms += ttfb_ms
+                full_text += item
+                n_chunks += 1
                 yield item
             elif kind == "done":
+                _log_llm({"api": "stream", "model": payload["model"],
+                          "ttfb_ms": ttfb_ms,
+                          "total_ms": int((time.time() - start) * 1000),
+                          "request": payload,
+                          "response_raw": {"content": full_text,
+                                           "chunks": n_chunks}})
                 return
             else:
                 error = item
+                _log_llm({"api": "stream", "model": payload["model"],
+                          "ttfb_ms": ttfb_ms,
+                          "total_ms": int((time.time() - start) * 1000),
+                          "request": payload, "error": str(error)})
                 break
 
         # 流式失败且一个 token 都没拿到 → 降级非流式
@@ -228,6 +254,54 @@ class OpenAICompatLLM:
         except urllib.error.HTTPError as e:
             detail = e.read().decode("utf-8", errors="ignore")[:300]
             raise RuntimeError(f"HTTP {e.code}: {detail}") from e
+
+
+# ---------------------------------------------------------------------------
+# LLM 原始请求/响应日志（JSONL，按天一个文件，data/logs/llm_YYYYMMDD.jsonl）
+# 记录完整 messages（system 提示词全文）与原始响应 dict；base64 图片自动截断。
+# 由 build_llm 按 observability.llm_log 配置开启。
+# ---------------------------------------------------------------------------
+
+_LLM_LOG_DIR: str | None = None
+
+
+def enable_llm_log(log_dir: str) -> None:
+    """开启 LLM 原始日志（传入目录；传空串关闭）。"""
+    global _LLM_LOG_DIR
+    _LLM_LOG_DIR = log_dir or None
+    if _LLM_LOG_DIR:
+        from pathlib import Path
+        Path(_LLM_LOG_DIR).mkdir(parents=True, exist_ok=True)
+
+
+def _trim_for_log(obj: Any, limit: int = 3000) -> Any:
+    """递归截断超长字符串（VLM 的 base64 图片、超长提示词），保留结构。"""
+    if isinstance(obj, str):
+        if len(obj) > limit:
+            return (obj[:500] + f"...[截断，全长 {len(obj)} 字符]..."
+                    + obj[-200:])
+        return obj
+    if isinstance(obj, dict):
+        return {k: _trim_for_log(v, limit) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_trim_for_log(v, limit) for v in obj]
+    return obj
+
+
+def _log_llm(event: dict) -> None:
+    """写一行 JSONL。任何失败静默（日志绝不影响对话）。"""
+    if not _LLM_LOG_DIR:
+        return
+    try:
+        from pathlib import Path
+        p = (Path(_LLM_LOG_DIR)
+             / time.strftime("llm_%Y%m%d.jsonl"))
+        event = {"ts": time.strftime("%Y-%m-%d %H:%M:%S"), **event}
+        with p.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(_trim_for_log(event), ensure_ascii=False,
+                               default=str) + "\n")
+    except Exception:
+        pass
 
 
 def _split_sentences(text: str, max_len: int = 40) -> list[str]:

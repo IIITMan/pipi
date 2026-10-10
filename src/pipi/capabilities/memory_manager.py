@@ -132,6 +132,19 @@ class MemoryManager:
     # 抽取
     # ------------------------------------------------------------------
 
+    # 记忆价值信号：命中则本轮立即抽取，否则攒轮合并（省 LLM 调用）
+    _WORTHY_KEYS = ("我叫", "我是", "我喜欢", "我不喜欢", "我讨厌", "记住",
+                    "别忘", "约定", "明天", "后天", "生日", "搬家", "辞职",
+                    "工作", "上学", "名字", "结婚", "生病", "买", "送",
+                    "第一次", "答应")
+
+    def _worth_extracting(self, user_text: str, reply_text: str) -> bool:
+        """本轮是否值得立即抽记忆（短闲聊攒轮合并，砍无效 LLM 调用）。"""
+        combined = f"{user_text}{reply_text}"
+        if len(combined) >= 25:               # 有实质内容
+            return True
+        return any(k in user_text for k in self._WORTHY_KEYS)
+
     async def extract(
         self,
         user_text: str,
@@ -139,7 +152,23 @@ class MemoryManager:
         profile: UserProfile | None = None,
         emotion_intensity: float = 0.0,
     ) -> ExtractResult:
-        """从一轮对话中抽取值得长期记住的信息。"""
+        """从一轮对话中抽取值得长期记住的信息。
+
+        攒轮策略：无记忆价值的短闲聊先进缓冲，凑满 3 轮合并抽一次 ——
+        避免每轮都烧一次 LLM（实测短闲聊抽取全返回空）。
+        """
+        pending: list[tuple[str, str]] = getattr(self, "_pending_turns", [])
+        if not self._worth_extracting(user_text, reply_text):
+            pending.append((user_text, reply_text))
+            self._pending_turns = pending
+            if len(pending) < 3:
+                return ExtractResult(method="skip")
+            # 攒满 3 轮 → 合并成一段批量抽
+            user_text = "\n".join(f"用户：{u}\n皮皮：{r}"
+                                  for u, r in pending)
+            reply_text = ""
+            self._pending_turns = []
+
         # 优先尝试 LLM 抽取
         if self.llm is not None:
             try:

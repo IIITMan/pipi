@@ -27,15 +27,20 @@ logger = logging.getLogger(__name__)
 _TOOL_RE = re.compile(
     r"^\s*\[(WEATHER|SEARCH|VISION)\s*[:：]\s*([^\]]{0,80})\]")
 
+# 意图标签（用户要求：回复必须先声明意图；闲聊显式化便于日志与兜底判定）
+_INTENT_RE = re.compile(r"^\s*\[(闲聊|聊天)\]\s*")
+
 TOOL_PROTOCOL = (
-    "\n\n# 工具调用协议（必须遵守）\n"
-    "若回答前需要外部实时信息，你的回复第一行只输出一个标记，然后立即停止"
-    "（标记后面什么都不要写，系统会把资料给你，你再正常回答）：\n"
-    "[WEATHER:城市]  —— 天气/气温/降雨类\n"
-    "[SEARCH:关键词] —— 需要查外部资料（百科/人物/新闻/历史事件）\n"
-    "[VISION:要点]   —— 需要看摄像头画面（用户问穿着/表情/你能否看见）\n"
-    "闲聊、情感表达、时间日期、关于皮皮自己的状态与能力、对皮皮的请求，"
-    "一律直接正常回答，绝不输出标记。\n"
+    "\n\n# 回复格式（每轮必须严格遵守）\n"
+    "回复的第一行先输出意图标签，再输出正文，格式二选一：\n"
+    "① 不需要外部信息时（闲聊/情感/时间/关于皮皮自己/对皮皮的请求）：\n"
+    "   [闲聊]正文……（标签与正文同一行，正文用你的口吻直接回答）\n"
+    "② 需要外部实时信息时，第一行只输出工具标记然后立即停止\n"
+    "（系统查到资料后会让你重新回答）：\n"
+    "   [WEATHER:城市]  —— 天气/气温/降雨类\n"
+    "   [SEARCH:关键词] —— 百科/人物/新闻/历史事件等外部资料\n"
+    "   [VISION:要点]   —— 需要看摄像头画面（用户问穿着/表情/能否看见/在干什么）\n"
+    "绝对不要不打标签直接回答。\n"
 )
 
 
@@ -213,6 +218,15 @@ class DialogueExpert(BaseAgent):
             m = _TOOL_RE.match(stripped)
             if m:
                 raise ToolCallSignal(m.group(1), m.group(2).strip())
+            # 意图标签 [闲聊]：剥除后透传正文（标签只用于日志/协议遵循）
+            mi = _INTENT_RE.match(stripped)
+            if mi:
+                rest = stripped[mi.end():]
+                decided = True
+                if rest:
+                    yield rest
+                buf = ""
+                continue
             if stripped.startswith("[") and "]" not in stripped and len(buf) < 96:
                 continue   # 疑似标记未闭合 → 继续等（要点可能很长）
             decided = True

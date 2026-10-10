@@ -19,8 +19,14 @@ class OpenCVCamera:
         self.width = width
         self.height = height
         self._cap: Any = None
-        import threading
-        self._lock = threading.Lock()   # VideoCapture 非线程安全，串行化 read
+        self._alock: Any = None   # asyncio.Lock（惰性创建）：open/read/close 全串行
+
+    def _ensure_lock(self):
+        """asyncio.Lock 惰性创建（构造时可能尚无事件循环）。"""
+        if self._alock is None:
+            import asyncio
+            self._alock = asyncio.Lock()
+        return self._alock
 
     @staticmethod
     def _quiet_cv2(cv2_mod) -> None:
@@ -31,56 +37,94 @@ class OpenCVCamera:
         except Exception:
             pass
 
+    _PROBE_SNIPPET = (
+        "import cv2,sys\n"
+        "cap = cv2.VideoCapture(int(sys.argv[1]), cv2.CAP_DSHOW)\n"
+        "ok = cap.isOpened()\n"
+        "cap.release()\n"
+        "sys.exit(0 if ok else 1)")
+
     def is_available(self) -> bool:
+        """子进程探测 —— 隔离 C++ 层崩溃。
+
+        坏驱动/被占用的摄像头在 DSHOW 下可能触发 cv2 C++ abort：
+        Python 的 try 捕不住，进程无 traceback 直接死（2026-10 实测）。
+        探测放独立子进程，失败就永久走 mock，主进程不再碰 cv2。
+        """
         try:
-            import cv2
-        except ImportError:
+            import subprocess
+            import sys as _sys
+
+            r = subprocess.run(
+                [_sys.executable, "-c", self._PROBE_SNIPPET, str(self.index)],
+                capture_output=True, timeout=20)
+            if r.returncode == 0:
+                return True
+            logger.warning("摄像头子进程探测失败（exit=%s）—— 视觉走 mock",
+                           r.returncode)
             return False
-        self._quiet_cv2(cv2)
-        # Windows 摄像头句柄释放有延迟（前一个进程刚退出/重启竞争），
-        # 探测失败时重试几次再下结论
-        import time
-        for attempt in range(3):
-            try:
-                # MSMF 后端经常报 0xC00D3704（grab 失败），DSHOW 稳定
-                cap = cv2.VideoCapture(self.index, cv2.CAP_DSHOW)
-                ok = cap.isOpened()
-                cap.release()
-                if ok:
-                    return True
-            except Exception:
-                pass
-            time.sleep(0.8 * (attempt + 1))
-        return False
+        except Exception as exc:
+            logger.warning("摄像头子进程探测异常：%s", exc)
+            return False
 
     def _open_sync(self):
-        """阻塞的 VideoCapture 构造（DSHOW 初始化 1~3s），只允许在工作线程跑。"""
+        """阻塞的 VideoCapture 构造（DSHOW 初始化 1~3s），只允许在工作线程跑。
+
+        cv2 构造可能抛 C++ exception（驱动/占用），必须捕获 —— 否则会
+        穿透感知循环导致主程序退出（2026-10 实测）。
+        """
         import cv2
         self._quiet_cv2(cv2)
-        cap = cv2.VideoCapture(self.index, cv2.CAP_DSHOW)
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
-        if not cap.isOpened():
-            # 初始化竞争时重试一次
-            cap.release()
-            cap = cv2.VideoCapture(self.index, cv2.CAP_DSHOW)
-        return cap
+        cap = None
+        for attempt in range(5):
+            try:
+                cap = cv2.VideoCapture(self.index, cv2.CAP_DSHOW)
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+                if cap.isOpened():
+                    return cap
+                cap.release()
+            except Exception as exc:
+                logger.warning("摄像头打开异常（第 %d 次）：%s", attempt + 1, exc)
+                try:
+                    if cap is not None:
+                        cap.release()
+                except Exception:
+                    pass
+            # 句柄释放有延迟（上一个进程刚退出可拖到 ~10s），退避重试
+            import time
+            time.sleep(1.0 + attempt)
+        return None
 
     async def open(self) -> None:
         import asyncio
-        self._cap = await asyncio.to_thread(self._open_sync)
+        async with self._ensure_lock():
+            if self._cap is not None:
+                return
+            self._cap = await asyncio.to_thread(self._open_sync)
 
     async def read(self):
-        """抓一帧。cv2 read 是同步阻塞调用（数十 ms~数秒，驱动异常时无限阻塞），
-        必须丢线程池 —— 在事件循环里直接调会冻结输入/心搏/TTS/WS（卡死根因）。"""
+        """抓一帧。cv2 全部操作经 asyncio.Lock 串行化 —— VideoCapture 的
+        并发 open 会让 DSHOW 在 C++ 层 access violation（进程无 traceback
+        直接死，2026-10 faulthandler 实锤：感知循环与监控推流并发 open）。
+        设备不可用/被占用 → 返回 None（调用方走自愈重开），绝不抛异常。"""
         import asyncio
-        if self._cap is None:
-            await self.open()
-        if self._cap is None:
-            return None
-        with self._lock:
-            ok, frame = await asyncio.to_thread(self._cap.read)
-        return frame if ok else None
+        async with self._ensure_lock():
+            if self._cap is None:
+                self._cap = await asyncio.to_thread(self._open_sync)
+            if self._cap is None:
+                return None
+            try:
+                ok, frame = await asyncio.to_thread(self._cap.read)
+            except Exception:
+                # 设备中途被拔/驱动崩溃 → 丢弃句柄，让自愈机制重建
+                try:
+                    self._cap.release()
+                except Exception:
+                    pass
+                self._cap = None
+                return None
+            return frame if ok else None
 
     async def close(self) -> None:
         if self._cap is not None:

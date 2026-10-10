@@ -55,6 +55,11 @@ from pipi.providers.llm.base import LLMProvider
 
 logger = logging.getLogger(__name__)
 
+# 视觉意图关键词（规则兜底 —— 便宜模型对工具协议遵循不稳）
+_VISION_KEYS = ("看见我", "看得见", "你能看见", "我长什么样", "我在干什么",
+                "我在干嘛", "我穿着", "我戴", "什么表情", "看看我",
+                "我手里", "我拿着", "我在做")
+
 
 @dataclass
 class TurnResult:
@@ -307,15 +312,20 @@ class ConversationOrchestrator:
                         r = on_chunk(delta)
                         if asyncio.iscoroutine(r):
                             await r
-                # 规则兜底：LLM 偶尔不守工具协议（旧对话历史会强化
-                # "直接回答"模式），天气关键词命中且没查过 → 强制补跑
-                # 天气工具，携带结果重新生成（皮皮会重说一遍正确的）
-                if (attempt == 0 and streamed and not ctx.tool_brief
-                        and self.weather is not None
-                        and WeatherService.detect(user_text)):
-                    await self._run_tool(
-                        ToolCallSignal("weather", ""), ctx, vision,
-                        user_text, on_notice)
+                # 规则兜底：LLM（尤其便宜模型）偶尔不守工具协议，旧对话历史
+                # 会强化"直接回答"模式 → 用关键词规则强制补跑工具，重生成。
+                # 天气由 WeatherService.detect，视觉由关键词表
+                forced: ToolCallSignal | None = None
+                if attempt == 0 and streamed and not ctx.tool_brief:
+                    if self.weather is not None \
+                            and WeatherService.detect(user_text):
+                        forced = ToolCallSignal("weather", "")
+                    elif vision is not None and any(
+                            k in user_text for k in _VISION_KEYS):
+                        forced = ToolCallSignal("vision", user_text)
+                if forced is not None:
+                    await self._run_tool(forced, ctx, vision,
+                                         user_text, on_notice)
                     raw_text = ""
                     streamed = False
                     continue
@@ -356,9 +366,17 @@ class ConversationOrchestrator:
                   flush=True)
         except Exception:
             pass
-        notice = {"weather": "等等哈，我看看天气……",
-                  "search": "等等哈，我查查……",
-                  "vision": "稍等，我看看……"}.get(tool)
+        # 占位播报：小池随机，避免每句都一样（生硬）
+        import random as _rand
+
+        notice = {
+            "weather": ["等等哈，我瞅瞅天气……", "稍等，我望望天……",
+                        "查一下哈，别急……"],
+            "search": ["等等哈，我查查……", "嗯……让我想想，查一下……",
+                       "稍等，翻翻资料……"],
+            "vision": ["稍等，我看看……", "让我瞅瞅……", "嗯——我看一眼哈……"],
+        }.get(tool)
+        notice = _rand.choice(notice) if notice else None
         if notice and on_notice is not None:
             try:
                 r = on_notice(notice)
@@ -399,6 +417,11 @@ class ConversationOrchestrator:
                 if desc:
                     vision_obs.raw["_vlm"] = desc
                     print(f"  👁 看到的是：{desc}", flush=True)
+                else:
+                    # 云端识别没成功：明确告知 LLM 只能靠本地感知，杜绝编造
+                    hint = vision_obs.to_hint("主人") or "屋里有动静"
+                    ctx.tool_brief = (f"（云端视觉识别这次没成功。你只知道：{hint}。"
+                                      "诚实说现在看不清细节，绝不要编造画面）")
         except asyncio.TimeoutError:
             logger.info("工具 %s 超时（6s）—— 第二轮将直接以已有知识回答", tool)
         except Exception as exc:

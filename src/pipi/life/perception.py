@@ -86,6 +86,8 @@ class PerceptionLoop:
 
     async def _loop(self) -> None:
         interval = 1.0 / max(self.fps, 0.1)
+        empty_streak = 0          # 连续无帧计数（自愈用）
+        reopen_fails = 0          # 重建失败次数（超限放弃，防反复触碰坏设备）
         while self._running:
             try:
                 # 重推理（InsightFace/hsemotion，首次还有模型下载）丢进线程池，
@@ -94,11 +96,37 @@ class PerceptionLoop:
                     frame = await self.vision.camera.read()
                     obs = None
                     if frame is not None:
+                        empty_streak = 0
+                        reopen_fails = 0
                         obs = await asyncio.to_thread(
                             self.vision.process_frame, frame)
                         # 原帧挂到观测上：云端视觉识别/监控推流复用（免二次抓拍）
                         if obs is not None:
                             obs.raw["_frame"] = frame
+                    else:
+                        # 连续 ~10s 无帧 → 摄像头掉了（被占用/句柄未释放），
+                        # 自动重建设备；连续 3 次失败就放弃（防反复触碰坏设备
+                        # 触发 C++ abort），下次重启皮皮时工厂会重新探测
+                        empty_streak += 1
+                        if empty_streak >= 10 and reopen_fails < 3:
+                            empty_streak = 0
+                            reopen_fails += 1
+                            logger.warning("摄像头连续无帧，重建设备（第 %d 次）…",
+                                           reopen_fails)
+                            try:
+                                await self.vision.camera.close()
+                            except Exception:
+                                pass
+                            try:
+                                await self.vision.camera.open()
+                                if getattr(self.vision.camera, "_cap", None) \
+                                        is not None:
+                                    reopen_fails = 0
+                            except Exception as exc:
+                                logger.warning("摄像头重建失败：%s", exc)
+                            if reopen_fails >= 3:
+                                logger.warning("摄像头多次重建失败，本次运行"
+                                               "停用视觉（重启皮皮可重试）")
                 else:
                     obs = await self.vision.capture()
                 if obs is not None:

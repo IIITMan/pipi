@@ -853,6 +853,14 @@ async def run_cli(sim: bool = False, user_id: str = "owner",
                   verbose: bool = False, cfg: Config | None = None,
                   voice: bool = False) -> None:
     """启动 CLI。"""
+    import logging
+
+    # 未检索的 task 异常也留痕（曾有无 traceback 退出的疑难场景）
+    loop = asyncio.get_running_loop()
+    loop.set_exception_handler(
+        lambda l, ctx: logging.error("asyncio 未处理异常：%s",
+                                     ctx.get("exception", ctx)))
+
     app = build_app(cfg, sim=sim)
     try:
         cli = CLI(app, user_id=user_id, verbose=verbose, voice=voice)

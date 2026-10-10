@@ -25,6 +25,11 @@ from pipi.infra import Config, setup_logging
 
 
 def main():
+    # 死亡现场捕获：cv2 C++ 崩溃/未检索的 task 异常曾导致无 traceback 退出
+    import faulthandler
+
+    faulthandler.enable()          # 段错误/C++ abort 时打印 Python 调用栈
+
     # Windows 中文控制台（GBK 代码页）兜底：不可编码字符降级显示而非崩溃
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
