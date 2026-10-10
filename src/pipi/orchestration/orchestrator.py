@@ -355,10 +355,16 @@ class ConversationOrchestrator:
                 pass
         try:
             if tool == "weather" and self.weather is not None:
-                brief = await asyncio.wait_for(self.weather.fetch(), timeout=6.0)
+                # 9s：首次含定位（wttr.in ~2s + forecast ~1s，含失败重试）；
+                # 坐标进程内缓存后，日常 <1s
+                brief = await asyncio.wait_for(self.weather.fetch(), timeout=9.0)
                 if brief:
                     ctx.tool_brief = brief
                     logger.info("天气工具命中：%s", brief)
+                else:
+                    # 查不到要明说 —— 否则 LLM 拿着视觉提示答"看不见外面"
+                    ctx.tool_brief = ("（天气服务这次没查到，直接说你查不到，"
+                                      "别编造天气，也不要扯到看不看得见）")
             elif tool == "search" and self.search is not None:
                 brief = await asyncio.wait_for(
                     self.search.fetch(query or user_text), timeout=6.0)
