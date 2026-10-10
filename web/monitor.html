@@ -520,7 +520,7 @@ function renderChat(){
   const items = chatBuf.slice(-40).reverse().map(m=>
     `<div class="evt ${m.role==="user"?"user":"pipi"}">
      <span class="t">${new Date(m.t*1000).toLocaleTimeString("zh",{hour12:false})}</span>
-     ${m.role==="user"?"🙂":"皮皮"} ${m.text}</div>`);
+     ${m.role==="user"?"主人：":"皮皮："} ${m.text}</div>`);
   $("chat").innerHTML = (items.length ? items.join("") :
     "<div style='color:var(--dim)'>暂无对话</div>") + "<div id='typing'></div>";
 }
