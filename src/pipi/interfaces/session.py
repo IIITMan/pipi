@@ -288,11 +288,8 @@ class InteractionSession:
         self.barge_min_ms = cfg.get("audio.mic.session.barge_in_min_ms", 200)
         self.barge_arm_s = cfg.get("audio.mic.session.barge_in_arm_s", 0.6)
         self.barge_mult = cfg.get("audio.mic.session.barge_in_multiplier", 1.6)
-        # 播报声被麦克风拾回（无 AEC）抬高打断线：回声基线 × 此乘数。
-        # 音箱外放嫌难打断可降到 1.2；戴耳机/回声小可升回 1.4 防自触发
-        self.barge_echo_mult = cfg.get(
-            "audio.mic.session.barge_in_echo_mult", 1.25)
         self._echo_rms = 0.0            # 扬声器回声 RMS 基线（EMA，打断线用）
+        self._last_barge_diag = 0.0     # 打断诊断节流
 
         # 唤醒应答预热：后台提前合成并缓存，首次唤醒即零延迟
         prewarm = getattr(self.tts, "prewarm", None)
@@ -708,14 +705,14 @@ class InteractionSession:
         if now - self._resp_started < self.barge_arm_s:
             return
         level = _rms(frame)
-        # 回声自适应：播报期间用非人声帧估计扬声器回声水平（EMA），
-        # 打断线 = max(说话阈值 × 倍数, 回声 × 1.4) —— 播报声小时稍大声即
-        # 可打断，播报声大时基线随之上浮防自触发
-        if level < self.capture.threshold * self.barge_mult:
-            self._echo_rms = (0.8 * self._echo_rms + 0.2 * level
-                              if self._echo_rms else level)
-        line = max(self.capture.threshold * self.barge_mult,
-                   self._echo_rms * self.barge_echo_mult)
+        # 打断线 = 校准的说话阈值 × 乘数（与最初版本一致，实测好用）。
+        # 曾加过"回声 EMA 抬线"防自触发 —— 实测 ark_tts 外放音量大，
+        # 回声把线顶到正常说话音量之上，打断直接失效，已移除。
+        # 防自触发靠：arm_s 冷却（播报开头不检测）+ KWS 叫名通道的 2s 延迟
+        line = self.capture.threshold * self.barge_mult
+        # 回声基线（EMA）仅作诊断观察，不再参与打断判定
+        self._echo_rms = (0.8 * self._echo_rms + 0.2 * level
+                          if self._echo_rms else level)
         if level >= line:
             if self._loud_frames == 0:
                 # 用户声音起点：从这里截取缓冲作为打断后的句子开头
@@ -728,6 +725,12 @@ class InteractionSession:
             self._loud_frames = 0
         if self._loud_frames * (self.FRAME_MS * 1000) >= self.barge_min_ms:
             self._do_barge_in(now)
+            return
+        # 诊断：打断打不进时看数值差距（verbose 下每 1.5s 一条）
+        if self.verbose and now - self._last_barge_diag > 1.5:
+            self._last_barge_diag = now
+            self._notify(f"  [打断诊断] 当前RMS {level:.0f} / "
+                         f"需 {line:.0f}（回声基线 {self._echo_rms:.0f}）")
 
     def _do_barge_in(self, now: float) -> None:
         self._notify("  打断！停播、听你说…")
