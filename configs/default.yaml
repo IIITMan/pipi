@@ -448,6 +448,8 @@ observability:
   metrics_enabled: true
   save_turns: true
   replay_enabled: true         # 允许会话回放
+  llm_log: true                # LLM 原始请求/响应日志（data/logs/llm_YYYYMMDD.jsonl：
+                               # 完整 messages 提示词 + 原始 JSON 响应；VLM 图片自动截断）
 
 # ---------------- 交互入口 ----------------
 interface:

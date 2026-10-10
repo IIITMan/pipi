@@ -158,6 +158,11 @@ def build_llm(cfg: Config, sim: bool) -> Any:
     if sim:
         return MockLLM()
 
+    # LLM 原始请求/响应日志（含完整提示词与原始 JSON，按天 JSONL）
+    if cfg.get("observability.llm_log", True):
+        from pipi.providers.llm.openai_compat import enable_llm_log
+        enable_llm_log(str(PROJECT_ROOT / "data" / "logs"))
+
     provider = cfg.get("llm.provider", "qwen")
     api_key = cfg.get("llm.api_key", "") or ""
     if not api_key:
