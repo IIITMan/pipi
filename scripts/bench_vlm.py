@@ -43,8 +43,10 @@ async def main() -> None:
               f"model={model!r}")
         return
     print(f"目标模型: {model} ｜ 次数 {n} ｜ 超时 {timeout:.0f}s\n")
+    # 与 orchestrator 一致：关思考（混合推理模型不关会截断/空响应）
     llm = OpenAICompatLLM(base_url=base, api_key=key, model=model,
-                          name="vlm-bench", timeout_s=30)
+                          name="vlm-bench", timeout_s=30,
+                          extra_body={"thinking": {"type": "disabled"}})
 
     import base64
     import cv2

@@ -403,10 +403,12 @@ class ConversationOrchestrator:
         vlm_model = (self.cfg_snapshot or {}).get("vision", {}).get("vlm_model", "")
         if vlm_model and vlm_model != getattr(llm, "model", ""):
             from pipi.providers.llm.openai_compat import OpenAICompatLLM
+            # thinking disabled：混合推理模型（如 DeepSeek V4.1）不关思考会把
+            # max_tokens 吃光导致空响应/截断，且白耗 1.5s+；关闭后实测 1.56s
             llm = OpenAICompatLLM(
                 base_url=llm.base_url, api_key=llm.api_key,
                 model=vlm_model, name="vlm",
-                extra_body=getattr(llm, "extra_body", None),
+                extra_body={"thinking": {"type": "disabled"}},
                 timeout_s=getattr(llm, "timeout_s", 30))
         messages = [
             {"role": "system",
@@ -420,7 +422,7 @@ class ConversationOrchestrator:
             ]},
         ]
         try:
-            resp = await llm.chat(messages, temperature=0.3, max_tokens=200)
+            resp = await llm.chat(messages, temperature=0.3, max_tokens=512)
         except Exception as exc:
             print(f"  👁 （视觉识别请求失败：{exc}）", flush=True)
             return None
