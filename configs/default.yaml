@@ -1,464 +1,370 @@
 # ============================================================
 # 皮皮 · 主配置
 # ============================================================
-# 所有可调参数集中在这里。环境变量可覆盖（前缀 PIPI_，如 PIPI_LLM__API_KEY）。
-# ★ 密钥不要写这里：用环境变量，或写到同目录的 local.yaml（已在 .gitignore，优先级最高）。
+# 环境变量可覆盖任何项（前缀 PIPI_，如 PIPI_LLM__API_KEY）。
+# ★ 密钥与个性化覆盖写到 configs/local.yaml（已在 .gitignore，优先级最高）。
+# 设计文档：docs/LLM_SELECTION.md / ARCHITECTURE.md / HARDWARE.md
 # ============================================================
 
 app:
   name: "皮皮"
-  data_dir: "./data"           # 数据库、模型、日志的存放目录
+  data_dir: "./data"
   log_level: "INFO"
   timezone: "Asia/Shanghai"
 
 # ---------------- 用户 ----------------
 user:
   default_user_id: "owner"
-  # 首次运行的"领养仪式"：皮皮会主动问名字
-  adoption_on_first_run: true
+  adoption_on_first_run: true   # 首次运行皮皮主动问名字（领养仪式）
 
-# ---------------- 天气工具 ----------------
-# 免费 Open-Meteo API（免 key、零成本）。对话出现天气意图时自动查，
-# 结果注入对话让皮皮用人格口吻回答；失败/断网时静默降级。
+# ---------------- 天气 ----------------
 weather:
   enabled: true
-  city: "济南"              # 部署城市（可改，如 "北京"）
-  sync_interval_s: 1800    # 真实天气 → 生命模块：周期同步间隔（类别变化才调心境）
+  city: "济南"                  # 默认城市（全局通用：天气查询/意图协议）
+  sync_interval_s: 1800         # 真实天气 → 生命模块的同步间隔
 
-# 通用联网搜索（零 key：Bing 网页搜索 → Wikipedia 多源链；事实疑问触发）
+# ---------------- 联网搜索 ----------------
 search:
   enabled: true
-  provider: "auto"         # auto(顺序尝试 bing→wikipedia) | bing | wikipedia | mock
+  provider: "auto"              # auto(bing→wikipedia) | bing | wikipedia | mock
 
-# 条件预警（贾维斯化②：不等你问，先开口；有料才说、有冷却、不打扰）
+# ---------------- 条件预警 ----------------
 alerts:
   enabled: true
-  report_home: true        # 主人回家 → 汇报今日提醒/异常（没料就默默高兴）
-  report_stranger: true    # 陌生人当日累计 ≥ stranger_min 次 → 提醒主人留意
-  home_cooldown_s: 1800    # 回家汇报冷却（30 分钟一次）
-  stranger_cooldown_s: 3600  # 陌生人预警冷却（1 小时一次）
-  stranger_min: 2          # 当日陌生人事件达到几次才预警
+  report_home: true             # 主人回家 → 汇报今日提醒/异常
+  report_stranger: true         # 陌生人当日累计 ≥ stranger_min 次 → 提醒
+  home_cooldown_s: 1800
+  stranger_cooldown_s: 3600
+  stranger_min: 2
 
-# 环境档案（贾维斯化③：家的持续认知，JSON 落盘 data/environment.json）
+# ---------------- 环境档案 ----------------
 env:
-  enabled: true
-  max_arrivals: 14         # 记住最近几次主人回家钟点，用于学"几点回来"
+  enabled: true                 # 家的持续认知（data/environment.json）
+  max_arrivals: 14              # 记住最近几次回家钟点，学"几点回来"
 
 # ---------------- 人格 ----------------
 persona:
-  active: "tsundere"           # 对应 configs/personas/<id>.yaml
+  active: "tsundere"            # tsundere | talkative | clingy | sharp_tongue | jarvis
   personas_dir: "configs/personas"
-  hot_reload: true             # 人格文件改动后自动生效（无需重启）
+  hot_reload: true
+  bot_name: "皮皮"              # 默认名字（人格 yaml 的 bot_name 会覆盖它）
 
-# ---------------- LLM（全云端方案） ----------------
-# 选型依据见 docs/LLM_SELECTION.md（含价格实算、结果列表与避坑清单）
-# 已明确：不做本地部署，全部走云端 API，只保留"接不上就退规则回复"的降级。
+# ---------------- LLM ----------------
+# 选型/价格实算见 docs/LLM_SELECTION.md
 llm:
-  provider: "doubao"           # qwen | deepseek | doubao | openai | mock
+  provider: "doubao"            # qwen | deepseek | doubao | openai | mock
   base_url: "https://ark.cn-beijing.volces.com/api/v3"
-  # ★ API Key 一律不写入本文件（会被 git 追踪）。
-  #   二选一：① 环境变量 PIPI_LLM__API_KEY  ② configs/local.yaml（已在 .gitignore）
-  #   留空不影响运行 —— app.py 检测到无 key 会自动降级到 MockLLM。
-  api_key: ""
-  # 机器人的名字（与人格名区分：人格是"傲娇"，名字是"皮皮"）
+  api_key: ""                   # ★ 不写这里：PIPI_LLM__API_KEY 或 local.yaml
   bot_name: "皮皮"
-  # ① 主对话模型：闲聊 / 共情 / 有性格的回应
-  #    实际值在 configs/local.yaml（ep-20261010183308-wqd6d，2026-10-10 更换）
-  model: "ep-20261010183308-wqd6d"
-  # ② cheap 路由（短句/抽取）不再单独设模型 —— 留空回落到 model
-  cheap_model: ""
+  model: "ep-20261010183308-wqd6d"   # 主对话模型（local.yaml 可覆盖）
+  cheap_model: ""               # 留空 = 全部走 model（短句/抽取不单独分档）
   timeout_s: 30
   max_retries: 2
-  # 透传给 API 的额外字段。
-  # 方舟 doubao-seed 系列默认开深度思考，记忆抽取/情感分析这类小任务会拖到
-  # 60s+ 超时；关闭后延迟 <3s。若发现对话质量下降可删除本节换回思考模式。
-  extra_body:
+  extra_body:                   # 关深度思考：小任务不被 reasoning 拖到超时
     thinking:
       type: "disabled"
-  # ③ 降级链：qwen(主) → deepseek(备) → mock(规则回复)
-  #    ★ 纯云端方案下这是最后一道防线：服务全挂时用本地规则话术兜住，
-  #      不引入本地模型，不为断网额外维护一套推理环境。
-  # 简单寒暄走便宜模型，复杂话题走主模型（成本控制）
   routing:
-    enabled: true
-    simple_max_chars: 8        # 输入短于该长度且无复杂意图 → 走小模型
-  # 陪伴场景实测 0.8 最能平衡「人性化」与「稳定性」
-  # <0.6 刻板像客服；>1.0 人格会飘、开始胡言乱语
-  temperature: 0.8
-  # ★ 性能优化：人格 Prompt 是每轮不变的前缀，放 messages 最前面且不改动，
-  #   可命中厂商前缀缓存（DeepSeek 缓存价 ¥0.02/百万，原价 1/100，
-  #   输入成本可降 70%+）。时间戳等每轮变化的字段请放到 user 消息里。
-  # ---------------- 以下为非对话模型（同样走云端） ----------------
-  # ★ 重要：皮皮全链路成本中，LLM 只占 0.8%，TTS 占 81%、ASR 占 18%
-  #   （按每天 20 轮估算，一年约 ¥56，其中 TTS ¥45）。
-  #   所以"选哪家平台"的第一优先级是语音，不是 LLM。详见 docs/LLM_SELECTION.md §2.5
-  #
-  # 推荐组合：
-  #   LLM  → 阿里百炼（延迟 ~300ms、免费额度足、生态全）  ← 本配置
-  #   语音 → 火山引擎（豆包 TTS 支持情感语气标签 + 声线复刻，陪伴感的关键）
-  #
-  # ASR：流式语音识别，火山 ¥1/小时，录音文件 ¥0.8/小时
-  # TTS：文字转语音，火山 ¥2.1/万字符；建议开情感标签与专属声线
-  # 视觉：本地 N100 已承担（YOLO 等轻量模型），无需上云，省流量与费用
+    enabled: true               # 短输入走 cheap_model 的分档（cheap 空 = 空转）
+    simple_max_chars: 8
+  temperature: 0.8              # <0.6 刻板像客服；>1.0 人格会飘
 
 # ---------------- 记忆 ----------------
 memory:
   db_path: "data/pipi.db"
-  embedder: "auto"             # auto | bge_small | tfidf
+  embedder: "auto"              # auto | bge_small | tfidf
   embed_model_path: "data/models/bge-small-zh"
   top_k: 5
-  max_per_type: 2              # 同类记忆最多召回几条
-  decay_interval_min: 60       # 衰减巡检间隔（分钟）
-  # 冷启动：这些类型直接 pinned
-  pin_types: ["identity", "commitment"]
-  # 隐私：允许用户查看/删除自己的记忆
+  max_per_type: 2               # 同类记忆最多召回几条
+  decay_interval_min: 60        # 艾宾浩斯遗忘巡检间隔
+  pin_types: ["identity", "commitment"]   # 冷启动直接 pinned
   allow_user_forget: true
   export_enabled: true
 
 # ---------------- 语音 ----------------
+# 模式：cascade（ASR→LLM→TTS 串联，当前）| realtime（火山 S2S，待接入）
+# hybrid 目标形态见 docs/LLM_SELECTION.md §9；工具调用必须走文本链
 audio:
-  enabled: true                # false 则纯文本模式
+  enabled: true
   sample_rate: 16000
-  frame_ms: 30                 # VAD 帧长
+  frame_ms: 30
+  mode: "cascade"
 
-  # ---------------- 语音链路模式（重要，见 docs/LLM_SELECTION.md §9）----------------
-  # "cascade"  = ASR → LLM → TTS 三段串联（成熟、可控、可插工具）
-  # "realtime" = 火山端到端实时语音大模型 Speech2Speech（低延迟、保情感、可打断）
-  # "hybrid"   = ★ 推荐：S2S 管对话流，文本 LLM 管工具/记忆（本项目的目标形态）
-  #
-  # 为什么推荐 hybrid：皮皮必须做工具调用（记忆写入/查天气/云台动作/回充），
-  # 而端到端 S2S 没有中间文本，工具调用插不进去。混合架构把"聊"交给 S2S、
-  # 把"做"外包给文本 LLM，两者兼得。
-  mode: "cascade"              # 当前默认走级联，realtime 待接入
-
-  # 端到端实时语音（火山 Speech2Speech）
-  realtime:
-    enabled: false             # 接入前保持关闭
+  realtime:                     # 端到端 S2S（未接入保持关闭）
+    enabled: false
     endpoint: "wss://openspeech.bytedance.com/api/v3/realtime/dialog"
     resource_id: "volc.speech.dialog"
-    app_id: ""                 # 火山控制台获取
-    access_token: ""           # 建议用环境变量 PIPI_AUDIO__REALTIME__ACCESS_TOKEN
+    app_id: ""
+    access_token: ""            # PIPI_AUDIO__REALTIME__ACCESS_TOKEN
     voice: "zh_female_vv_jupiter_bigtts"
-    # 皮皮的核心：把人格写进端到端模型的指令，它支持自然语言控制情绪/语速/声线
-    persona_instruction: ""     # 运行时由 persona 文件填充
-    # ★ 必须打开：S2S 没有中间文本，这几项是唯一的可观测点
+    persona_instruction: ""     # 运行时由 persona 填充
     observability:
-      save_transcript: true    # 落 ASR 转写文本（用于记忆写入与调试）
-      save_llm_text: true      # 落模型对话文本
-      moderation: true          # 走后置内容审核
-    # S2S 只负责"聊"，这些意图转交文本 LLM + 工具链
+      save_transcript: true
+      save_llm_text: true
+      moderation: true
     delegate_to_agent: ["记忆写入", "记忆查询", "天气", "云台动作", "回充", "控制指令"]
 
-  # ASR：唯一方案 sherpa-onnx（无降级；模型缺失 → 麦克风输入不可用）
-  asr_chain: ["sensevoice"]
+  asr_chain: ["sensevoice"]     # 唯一方案 sherpa-onnx，无降级
   asr:
     sensevoice:
-      # sherpa-onnx SenseVoice int8（无 torch/funasr，内存 ~300MB）
       sherpa_model_dir: "data/models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17"
       num_threads: 2
-      use_itn: false           # 逆文本正则化：关（会把"十"错转成"1"，
-                               #  对话场景中文数字更自然；要阿拉伯数字再开）
+      use_itn: false            # 中文数字更自然；要阿拉伯数字再开
       language: "auto"
     cloud_dashscope:
       api_key: ""
       model: "paraformer-realtime-v2"
-  # TTS 降级链
+
   tts_chain: ["ark_tts", "edge_tts", "mock"]
   tts:
-    # 豆包语音合成大模型 2.0（首选：真流式、情感演绎，按字计费）
-    # key 从「火山引擎 > 语音技术控制台 > API Key 管理」获取
-    ark_tts:
-      api_key: ""                            # 同 llm：用 PIPI_AUDIO__TTS__ARK_TTS__API_KEY 或 configs/local.yaml
+    ark_tts:                    # 豆包 TTS 2.0（真流式 + 情感演绎）
+      api_key: ""               # PIPI_AUDIO__TTS__ARK_TTS__API_KEY 或 local.yaml
       resource_id: "seed-tts-2.0"
-      speaker: "zh_female_peiqi_uranus_bigtts"   # 音色 ID（控制台 > 音色库 可换）
-      model: ""                                # 复刻音色时才需指定
+      speaker: "zh_female_peiqi_uranus_bigtts"   # 音色 ID（人格 voice_id 可覆盖）
+      model: ""                 # 声线复刻时才需指定
       sample_rate: 24000
       bitrate: 160000
-      emotion_instruction: true                # 2.0 语音指令：按情绪调整语气（不计费）
-      cache_enabled: true                      # 固定短语（唤醒应答等）合成一次后播本地缓存
+      emotion_instruction: true # 按情绪调整语气（不计费）
+      cache_enabled: true       # 固定短语（唤醒应答等）本地缓存
       cache_dir: "data/tts_cache"
     edge_tts:
       voice: "zh-CN-XiaoxiaoNeural"
-  # 麦克风语音输入（run.py --voice 启用；缺依赖/无设备自动退回键盘）
+
   mic:
     sample_rate: 16000
-    silence_rms: auto           # auto=开机自动校准环境噪声；或填固定数值
-    noise_multiplier: 2.2       # auto 模式：噪声底的 2.2 倍算"在说话"
-    min_silence_rms: 120        # 自动阈值下限（太灵敏就调高）
-    gain: 2.0                   # 采集增益：麦克风声音小就调大（2~4），杂音大降回 1
-    pre_roll_s: 0.6             # 说话起始前预录时长，防止唤醒词开头丢字
-    silence_tail: 1.2           # 连续静音多久判定"说完"（秒）
-    max_seconds: 15             # 单段录音兜底上限
-    # 免提模式（run.py --voice）：唤醒词 + 自动休眠
-    # "pp"/"p p"：SenseVoice 常把「皮皮」转写成字母
-    wake_words: ["皮皮", "pipi"]
-    sleep_after_s: 30           # 唤醒后安静多久回到待唤醒（秒）
-    # 四阶段交互状态机
-    vad:
-      # 唯一方案：sherpa-onnx silero_vad（模型缺失启动报错，不降级）
+    silence_rms: auto           # auto=开机校准；或填固定数值
+    noise_multiplier: 2.2       # 噪声底 ×2.2 算"在说话"
+    min_silence_rms: 120        # 自动阈值下限
+    gain: 2.0                   # 声音小调大（2~4），杂音大降回 1
+    pre_roll_s: 0.6             # 预录时长，防唤醒词丢字
+    silence_tail: 1.2           # 静音多久判"说完"（秒）
+    max_seconds: 15
+    wake_words: ["皮皮", "pipi"]   # 人格 yaml 的 wake_words 会覆盖它
+    sleep_after_s: 30           # 会话安静多久回待唤醒
+    vad:                        # sherpa silero_vad（无降级）
       model: "data/models/vad/silero_vad.onnx"
-      threshold: 0.5            # 人声判定阈值
-      min_silence_ms: 600       # 端点检测：连续静音判句（600~800 可调）
-      min_speech_ms: 250        # 最短发声时长（低于此不算开口，抗噪）
-    kws:
-      # 唯一方案：sherpa-onnx KeywordSpotter（模型缺失启动报错，不降级）
-      model_dir: "data/models/kws"   # sherpa zipformer 中文 KWS（3.3M 参数）
-      # 唤醒词写在 data/models/kws/keywords.txt（拼音 token + @词，如 `p í p í @皮皮`）
-      # 注意：该模型为中文 KWS，不支持英文唤醒词
+      threshold: 0.5
+      min_silence_ms: 600       # 端点检测（600~800 可调）
+      min_speech_ms: 250
+    kws:                        # sherpa KeywordSpotter（无降级）
+      model_dir: "data/models/kws"
+      # 唤醒词在 data/models/kws/keywords.txt（拼音 token + @词；仅支持中文）
       keywords_score: 1.0
       keywords_threshold: 0.25
-      min_speech_s: 0.3         # 唤醒段最短时长（低于此丢弃）
-    voiceprint:
-      # 声纹识别（sherpa-onnx CAM++/ERes2Net）：区分主人与陌生人
-      # 首次说话自动登记主人声纹；之后相似度 ≥ threshold → 主人，否则陌生人
+      min_speech_s: 0.3
+    voiceprint:                 # 声纹认主（首次说话自动登记）
       enabled: true
       model: "data/models/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx"
-      threshold: 0.5            # 相似度 ≥ 此值 → 主人
-      reject_threshold: 0.35    # 相似度 < 此值 → 陌生人；两者之间保持原判（灰区）
-      auto_enroll: true         # 无主人声纹时，第一段语音自动登记
+      threshold: 0.5            # ≥ 主人；< reject → 陌生人
+      reject_threshold: 0.35
+      auto_enroll: true
     session:
-      timeout_s: 10             # 阶段4：会话内安静多久回待机（8~12）
-      barge_in: true            # 阶段3：抢话打断（外放音箱误触发时可关）
-      barge_in_min_ms: 200      # 持续人声多久触发打断
-      barge_in_arm_s: 1.0       # 开播后多久内不响应打断（防回声自触）
-      barge_in_multiplier: 1.15 # 打断能量倍数（相对说话阈值；另有回声自适应
-                                # 基线保护，播报声大时打断线随之上浮）
-  # 打断
+      timeout_s: 10             # 会话安静多久回待机
+      barge_in: true            # 抢话打断
+      barge_in_min_ms: 200
+      barge_in_arm_s: 1.0       # 开播后不响应打断的冷却
+      barge_in_multiplier: 1.15 # 打断能量倍数（相对说话阈值）
   interrupt:
     enabled: true
-    vad_threshold: 0.5         # 用户开口判定阈值
+    vad_threshold: 0.5
     min_speech_ms: 200
 
-# ---------------- 生命模块（自发念头/生理状态，v2.1 阶段1）----------------
-# 引擎：pulse（PULSE 心搏，LivingLoop 适配层，默认）| legacy（旧 LifeEngine）
+# ---------------- 生命模块 ----------------
+# backend: pulse（PULSE 心搏，默认）| legacy（旧 LifeEngine，回退用）
 pulse:
-  backend: "pulse"             # pulse | legacy
-  tick_s: 1.0                  # 心搏 1Hz（呼吸波形/潮汐/天气实时运转）
-  vocal_cooldown_s: 90.0       # 自发开口最小间隔
-  vocal_prob: 0.02             # 每次 5s 决策的开口基础概率（克制，防烦人）
-  diary_memory: false          # 每日日记是否写入记忆库（默认只推送监控/日志）
+  backend: "pulse"
+  tick_s: 1.0                   # 心搏 1Hz
+  vocal_cooldown_s: 90.0        # 自发开口最小间隔
+  vocal_prob: 0.02              # 决策开口概率（克制）
+  diary_memory: false
 
 life:
   enabled: true
-  personality:                 # §2.4 人格固定参数
-    extraversion: 6.0          # 外向度 0~10，越高越爱主动说话
+  personality:
+    extraversion: 6.0           # 0~10，越高越爱主动说话
     curiosity_weight: 6.0
-    sensitivity: 5.0           # 高则容易被打断/冷落影响情绪
+    sensitivity: 5.0
     like: ["晚霞", "小故事", "聊天气"]
     dislike: ["巨大噪音", "连续频繁打断"]
-  rates:                       # §8 后台任务周期
-    physio_hz: 1.0             # 生理更新 1Hz
-    thought_hz: 3.0            # 念头生成 3Hz
-    scheduler_hz: 2.0          # 行为调度 2Hz
-  vocal_cooldown_s: 45.0       # §9.1 发声念头全局冷却（文档 18s，实测偏频繁已放宽）
-  wandering_cooldown_s: 90.0   # wandering 发呆模式冷却
-  thought_ttl_s: 5.0           # §9.2 念头最大存活
-  social_vocal_threshold: 7.5  # 想找人说话的触发阈值（0~10，越高越稀有；本体行为不受限）
-  # 感知接入（PERCEPTION_PLAN）：摄像头 → 离散事件 → 生理/关心列表
-  # 总开关仍是 vision.enabled；无摄像头时感知循环不启动
-  perception:
+  rates:
+    physio_hz: 1.0
+    thought_hz: 3.0
+    scheduler_hz: 2.0
+  vocal_cooldown_s: 45.0
+  wandering_cooldown_s: 90.0
+  thought_ttl_s: 5.0
+  social_vocal_threshold: 7.5   # 想找人说话的阈值（越高越稀有）
+  perception:                   # 摄像头 → 离散事件（总开关 vision.enabled）
     enabled: true
-    fps: 1.0                 # 常驻采样帧率（比对话时的 1.5fps 省）
-    debounce_s: 30.0         # 同一事件去重窗口
-    stranger_cooldown_s: 300 # 陌生人受惊冷却（防频繁吓到）
-  energy_min_vocal: 2.5        # §9.3 精力下限：低于则念头不发声（犯困）
-  sleep_energy: 2.5            # §2.2 精力低于则注意力切 rest（犯困闭眼）
-  wandering_enter_s: 45.0      # 安静多久进入 wandering 发呆
-  idle_motion_interval_s: 30.0 # 待机物理微动作最小间隔（活感主要由眼睛表情表达）
-  action_backend: "mock"       # §7.1 mock=PC 原型 | ros2=阶段2
-  # WebSocket 推送：窗口端内嵌服务，静态监控页（web/monitor.html）直接订阅
-  # 部署形态 = 只跑窗口进程；Docker 部署时仅需暴露该端口
-  ws_host: "0.0.0.0"           # 监听地址（docker 里用 0.0.0.0）
-  ws_port: 8848                # 监听端口
-  # 联想链念头（机制 1）：承接式续想——引用上文与记忆的连续思想流
-  chain:
+    fps: 1.0
+    debounce_s: 30.0            # 同一事件去重窗口
+    stranger_cooldown_s: 300
+  energy_min_vocal: 2.5         # 精力低于此不发声
+  sleep_energy: 2.5             # 精力低于此切休息
+  wandering_enter_s: 45.0
+  idle_motion_interval_s: 30.0
+  action_backend: "mock"        # mock | ros2
+  ws_host: "0.0.0.0"            # 监控推送（web/monitor.html 订阅）
+  ws_port: 8848
+  chain:                        # 联想链念头
     enabled: true
-    chain_prob: 0.01           # 每次念头评估的触发概率（实测过频先调这里）
-    chain_cooldown_s: 90.0     # 两次联想的最小间隔
-    require_idle: true         # 仅 IDLE 且精力充足时触发
-    min_energy: 3.0            # 犯困不触发
-    vocal_prob: 0.3            # 联想念头转发声的概率（其余仅内心留痕）
+    chain_prob: 0.01
+    chain_cooldown_s: 90.0
+    require_idle: true
+    min_energy: 3.0
+    vocal_prob: 0.3
     max_tokens: 60
-    timeout_s: 12.0            # LLM 渲染超时（超时静默丢弃）
+    timeout_s: 12.0
 
-# ---------------- 成长系统（GROWTH_DESIGN v0.2）----------------
+# ---------------- 成长系统 ----------------
 growth:
   enabled: true
   relationship:
-    enabled: true              # 关系阶段机总开关
-    stage_days: [0, 5, 30, 90] # S1→S4 各阶段要求的累计互动天数
-    stage_milestones: [0, 1, 2, 3]  # 各阶段要求的里程碑数
-    min_affection_s4: 550      # S4 好感度门槛
-    regress_days: 30           # ≥N 天不联系回落一级
-    regress_floor: 2           # 回落不低于 S2（认过主不是陌生人）
-  plasticity:                  # 可塑性曲线：偏好演化步长系数（S1 婴儿→S4 成熟）
+    enabled: true               # 关系阶段机（S1~S4）
+    stage_days: [0, 5, 30, 90]
+    stage_milestones: [0, 1, 2, 3]
+    min_affection_s4: 550
+    regress_days: 30
+    regress_floor: 2            # 回落不低于 S2
+  plasticity:                   # 可塑性曲线（S1 婴儿→S4 成熟）
     curve: [1.0, 0.6, 0.35, 0.15]
-    base_step: 0.08            # 基础步长（like/dislike 单位为档，0~10）
-    cap_offset: 3              # 偏好相对人格基线的最大偏移（±3 档）
-  expression:
-    enabled: true              # 高频表达拾取（模仿学习）
-    min_count: 3               # 出现 ≥N 次入库
-    max_len: 12                # 短语最大长度（字）
-    quote_per_session: 2       # 场景话术每会话引用上限（防滥用）
+    base_step: 0.08
+    cap_offset: 3
+  expression:                   # 高频表达拾取（模仿学习）
+    enabled: true
+    min_count: 3
+    max_len: 12
+    quote_per_session: 2
   milestone:
-    enabled: true              # 里程碑总开关（M1~M7）
-    night_well_target: 100     # M6：第 N 次晚安
+    enabled: true
+    night_well_target: 100      # M6：第 N 次晚安
 
-# ---------------- 提醒 / 闹铃 / 待办（阶段 F） ----------------
+# ---------------- 提醒 / 闹铃 ----------------
 reminders:
   enabled: true
-  tick_s: 2.0                  # 定时检查周期（秒）
-  retry_max: 3                 # 发声失败重试次数
-  retry_window_s: 120          # 发声重试总窗口（秒）
-  default_offset_s: 3600       # 解析不出时间时默认 1 小时后
-  ack_window_s: 600            # "知道了"可完成最近 10 分钟内触发的提醒
-  quiet_hours: [23, 7]         # 静默窗口：非闹铃顺延，闹铃准点必响
+  tick_s: 2.0
+  retry_max: 3
+  retry_window_s: 120
+  default_offset_s: 3600        # 解析不出时间默认 1 小时后
+  ack_window_s: 600             # "知道了"可完成最近 10 分钟内的提醒
+  quiet_hours: [23, 7]          # 静默窗口（闹铃准点必响）
 
 # ---------------- 视觉 ----------------
 vision:
-  enabled: true                # false 则关闭摄像头（隐私优先）
+  enabled: true                 # false = 关摄像头（隐私优先）
   camera_index: 0
-  fps: 1.5                     # 感知采样帧率（不需要高帧率）
-  # 能力分配：本地只做轻量检测 + 跟随，复杂理解交给云端多模态 LLM
+  fps: 1.5
   capabilities:
-    detect: true               # 人脸检测（本地 YuNet，预下载模型）
-    follow: true               # 人脸跟随（检测到人脸 → 云台 LOOK_AT 转向）
-    recognize: false           # 认主 → 声纹识别已覆盖；视觉理解走云端
-    expression: false          # 表情 → 云端传图识别
-    clothing: false            # 衣着 → 云端传图识别
-  detector: "yunet"            # yunet | mediapipe
+    detect: true                # 人脸检测（本地 YuNet）
+    follow: true                # 人脸跟随 → 云台转向
+    recognize: false            # 认主已由声纹覆盖
+    expression: false           # 表情走云端
+    clothing: false
+  detector: "yunet"             # yunet | mediapipe
   detector_model: "data/models/face_detection_yunet_2023mar.onnx"
-  recognizer: "insightface"    # insightface | none
-  # 人脸跟随（本地）：人脸偏离画面中心超死区 → 云台转向，cooldown 节流
-  follow_deadzone: 0.12        # 归一化偏移死区（0~0.5）
-  follow_cooldown_s: 2.0       # 两次转向的最小间隔
-  # 云端传图识别（多模态 LLM）：对话提到视觉相关内容时，把当前画面
-  # 连同问题一起发给模型（方舟 Chat API 的 image_url 格式，
-  # data URL 与公网 URL 均可；图片 ≤10MB，JPEG/PNG/BMP/WEBP）
-  vlm: true
-  # 视觉接入点：主对话模型若不支持图片输入，在此填支持视觉的
-  # 推理接入点 id；留空则复用 llm.model
-  vlm_model: ""
-  # 监控页画面推流（JPEG 经 WS 到 web/monitor.html；只推流不落盘）
-  monitor_stream: true
+  recognizer: "insightface"
+  follow_deadzone: 0.12
+  follow_cooldown_s: 2.0
+  vlm: true                     # 云端多模态识别（画面 + 问题 → 描述）
+  vlm_model: ""                 # 留空复用 llm.model；或填支持视觉的接入点
+  monitor_stream: true          # 监控页画面推流（只推流不落盘）
   monitor_fps: 0.5
   expression_model: "hsemotion" # hsemotion | fer | none
-  face_match_threshold: 0.45   # 人脸比对的余弦阈值
-  # 在场判定宽限（秒）：漏检一两帧（低头/侧脸）不算"主人离开"，
-  # 防止 owner_present 帧间抖动让 LLM 反复说"你站那么远，过来点"
-  presence_grace_s: 6.0
-  enroll_dir: "data/faces"     # 主人照片目录
-  # 隐私
+  face_match_threshold: 0.45
+  presence_grace_s: 6.0         # 漏检几帧不算"主人离开"（防抖）
+  enroll_dir: "data/faces"
   privacy:
-    save_frames: false         # 默认不落盘原始画面
-    save_observations: true    # 只存结构化观测，保留 N 天
+    save_frames: false          # 原始画面不落盘
+    save_observations: true
     observation_retention_days: 7
 
 # ---------------- 主动搭话 ----------------
 proactive:
   enabled: true
-  idle_hours: 2.0              # 多久没交互算"被冷落"
+  idle_hours: 2.0               # 多久没交互算"被冷落"
   return_greeting_cooldown_min: 30
-  quiet_hours: [23, 7]         # 夜间静默：23:00 ~ 07:00（跨天）
-  # 各触发器的开关与优先级
+  quiet_hours: [23, 7]
   triggers:
-    return_home:      { enabled: true, priority: 90 }   # 主人回家 → 主动问候
+    return_home:      { enabled: true, priority: 90 }
     concern_followup: { enabled: true, priority: 85 }
     important_date:   { enabled: true, priority: 80 }
     idle:             { enabled: true, priority: 50 }
     morning:          { enabled: true, priority: 40 }
     night_sleep:      { enabled: true, priority: 40 }
     random:           { enabled: true, priority: 10 }
-    # 电量低 → 主动说一声再去充电（比"默默走开"更有陪伴感）
     low_battery:      { enabled: true, priority: 95 }
-  # 同类触发的冷却期（分钟）—— 防止同一理由反复开口
-  cooldowns:
-    return_home: 30            # 回家问候：同一天进出多次只问一次（30 分钟内）
-    concern_followup: 60       # 关心追问
-    important_date: 1440       # 重要日子一天只提醒一次
-    idle: 180                  # "你都不理我" 三小时内最多一次
-    morning: 720               # 早间问候一天一次
-    night_sleep: 720           # 催睡一天一次
-    random: 240                # 随机撒娇
-    low_battery: 120           # 低电提醒两小时内最多一次
+  cooldowns:                    # 同类触发的冷却（分钟）
+    return_home: 30
+    concern_followup: 60
+    important_date: 1440
+    idle: 180
+    morning: 720
+    night_sleep: 720
+    random: 240
+    low_battery: 120
 
-# ---------------- 运动控制 ----------------
+# ---------------- 运动控制（详见 docs/HARDWARE.md）----------------
 motion:
-  enabled: false               # 软件阶段默认关闭，纯日志
-  # mock      纯日志模拟
-  # wheeltec  轮趣 C30D 实机（全机唯一的下位机：头部舵机 + 灯带 + 麦轮底盘）
-  provider: "mock"
-  wheeltec:                    # 轮趣 C30D（micro-ROS 固件，详见 docs/HARDWARE.md §7）
-    # 数据流：皮皮 → ROS2 话题 → micro-ROS agent → C30D → 舵机 / 灯带 / 麦轮电机
-    topic_cmd: "/cmd_vel"      # 底盘速度指令（geometry_msgs/Twist）
-    topic_head: "/pipi/head"   # 头部关节角（std_msgs/Float32MultiArray）
-                               #   数组布局 [head_pan°, head_tilt°, led(0..1)]
-                               #   固件侧布局必须与此一致（docs/HARDWARE.md §9）
-    topic_odom: "/odom"        # 里程计回传（nav_msgs/Odometry）
-    node_name: "pipi_base"     # 本进程创建的 ROS2 节点名
-    max_head_tilt_deg: 45      # 俯仰舵机行程（±°）
-    # micro-ROS agent 启动命令（另开终端或 systemd）：
-    #   ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyUSB0 -b 921600
-  # 语义动作开关（哪些动作允许执行）
+  enabled: false                # 软件阶段默认关闭
+  provider: "mock"              # mock（纯日志）| wheeltec（轮趣 C30D 实机）
+  wheeltec:
+    topic_cmd: "/cmd_vel"       # 底盘 Twist 指令
+    topic_head: "/pipi/head"    # [head_pan°, head_tilt°, led(0..1)]
+    topic_odom: "/odom"
+    node_name: "pipi_base"
+    max_head_tilt_deg: 45
   gestures_enabled: true
   max_head_pan_deg: 120
 
 # ---------------- 自动回充（详见 docs/CHASSIS.md §12）----------------
 charging:
-  enabled: false               # 软件阶段默认关闭（与 motion.enabled 一致）
-  # 触发策略：两个条件取"或"，任一满足即发起回充
+  enabled: false
   trigger:
-    battery_low_pct: 0.25      # 电量低于 25% 主动回充
-    idle_minutes: 20           # 或连续 20 分钟无人交互时"顺便去充"
-    scheduled_time: "23:30"    # 或到点（夜间静默期开始后）自动归桩
-    respect_quiet_hours: true  # 静默期内不发语音，只默默去充
-  # 引导方式：远程视觉找桩 + 近程红外对齐
-  guidance:
-    far: "vision_tag"          # vision_tag | vision_qr | none
-    far_max_range_m: 3.0       # 视觉引导有效距离（超过靠里程计摸过去）
-    near: "ir_array"           # ir_array | ir_single | none
-    near_enter_range_m: 0.35   # 进入红外引导的距离阈值
-    tag_family: "tag36h11"     # AprilTag 家族（桩面贴纸）
-    tag_id: 0                  # 本桩的 ID（多桩场景用于选桩）
-  # 三段式对接的控制器参数（P 控制 + 死区）
-  align:
-    vx_kp: 0.80                # 缩距：速度 = kp × 距离
-    vy_kp: 1.20                # 调心偏：横移速度 = kp × 横向偏差(m)
-    wz_kp: 2.00                # 调角偏：角速度 = kp × 航向偏差(rad)
-    lateral_deadband_mm: 8.0   # 横向偏差死区（±8mm 内不动）
-    heading_deadband_deg: 3.0  # 航向偏差死区
-    distance_deadband_mm: 12.0 # 距离死区（贴到桩前 12mm 停）
-    timeout_s: 25.0            # 单次对齐超时
-    max_retries: 3             # 失败重试次数
-  # 桩端电气
+    battery_low_pct: 0.25
+    idle_minutes: 20
+    scheduled_time: "23:30"
+    respect_quiet_hours: true
+  guidance:                     # 远程视觉找桩 + 近程红外对齐
+    far: "vision_tag"
+    far_max_range_m: 3.0
+    near: "ir_array"
+    near_enter_range_m: 0.35
+    tag_family: "tag36h11"
+    tag_id: 0
+  align:                        # 三段式对接（P 控制 + 死区）
+    vx_kp: 0.80
+    vy_kp: 1.20
+    wz_kp: 2.00
+    lateral_deadband_mm: 8.0
+    heading_deadband_deg: 3.0
+    distance_deadband_mm: 12.0
+    timeout_s: 25.0
+    max_retries: 3
   dock:
-    charge_voltage_v: 12.6     # 恒压点（3S 满充）
-    charge_current_a: 3.5      # 0.5C 恒流（18650 3S2P 7.0Ah）
-    contact_full_s: 3.0        # 触点闭合后确认充电的时间
-    no_current_fault_s: 10.0   # 闭合后 10s 无电流 → 判 FAULT
-  # 安全
+    charge_voltage_v: 12.6
+    charge_current_a: 3.5
+    contact_full_s: 3.0
+    no_current_fault_s: 10.0
   safety:
-    abort_on_human_near: true  # 回充途中有人靠近 → 暂停让路
-    human_near_m: 0.8          # "靠近"判定距离
-    max_dock_speed_mps: 0.15   # 与 wheeltec.py 的 DOCK_MAX_VX 一致
+    abort_on_human_near: true
+    human_near_m: 0.8
+    max_dock_speed_mps: 0.15
 
 # ---------------- 可观测性 ----------------
 observability:
   trace_enabled: true
   metrics_enabled: true
   save_turns: true
-  replay_enabled: true         # 允许会话回放
-  llm_log: true                # LLM 原始请求/响应日志（data/logs/llm_YYYYMMDD.jsonl：
-                               # 完整 messages 提示词 + 原始 JSON 响应；VLM 图片自动截断）
+  replay_enabled: true
+  llm_log: true                 # LLM 原始请求/响应（data/logs/llm_日期.jsonl）
 
 # ---------------- 交互入口 ----------------
 interface:
   cli: true
   web:
-    enabled: false
+    enabled: false              # 遗留（监控用 web/monitor.html + WS 即可）
     host: "0.0.0.0"
     port: 8848
   wake_word:
-    enabled: false
-    engine: "openwakeword"     # 预留
+    enabled: false              # 预留（当前用 sherpa KWS）
+    engine: "openwakeword"
     keyword: "皮皮"
