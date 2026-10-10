@@ -793,6 +793,8 @@ class CLI:
             if self.app.cfg.changed_on_disk():
                 self.app.cfg.reload()
             new_persona = load_persona(self.app.cfg)
+            from pipi.app import apply_persona_overrides
+            apply_persona_overrides(self.app.cfg, new_persona)
             self.app.persona = new_persona
             self.orch.persona = new_persona
             self.orch.dialogue_expert.pb.persona = new_persona

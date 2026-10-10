@@ -135,6 +135,21 @@ def load_persona(cfg: Config) -> PersonaSpec:
     return PersonaSpec.from_dict(data)
 
 
+def apply_persona_overrides(cfg: Config, persona: PersonaSpec) -> None:
+    """人格级覆盖写回运行配置（启动与 /reload 热重载都会调用）：
+
+    - bot_name    → persona.bot_name（皮皮自己的名字，贾维斯 → "贾维斯"）
+    - wake_words  → audio.mic.wake_words（独立唤醒词）
+    - voice_id    → audio.tts.ark_tts.speaker（独立音色，未定义则保留全局）
+    """
+    if persona.bot_name:
+        cfg.set("persona.bot_name", persona.bot_name)
+    if persona.wake_words:
+        cfg.set("audio.mic.wake_words", list(persona.wake_words))
+    if persona.voice_id:
+        cfg.set("audio.tts.ark_tts.speaker", persona.voice_id)
+
+
 def build_repos(db: Database) -> Repos:
     from pipi.infra.db.repositories import GrowthRepo
 
@@ -327,6 +342,10 @@ def build_app(cfg: Config | None = None, *, sim: bool = False,
     cfg = cfg or Config.default()
     now = (clock or SystemClock()).now()
 
+    # 人格（最先装配 —— 人格级覆盖要赶在 TTS/会话读取配置之前生效）
+    persona = load_persona(cfg)
+    apply_persona_overrides(cfg, persona)
+
     # 数据库
     data_dir = PROJECT_ROOT / cfg.get("app.data_dir", "data")
     data_dir.mkdir(parents=True, exist_ok=True)
@@ -342,9 +361,6 @@ def build_app(cfg: Config | None = None, *, sim: bool = False,
     # 确保默认用户存在
     default_uid = cfg.get("user.default_user_id", "owner")
     repos.user.ensure(default_uid, now)
-
-    # 人格
-    persona = load_persona(cfg)
 
     # LLM
     llm = build_llm(cfg, sim)

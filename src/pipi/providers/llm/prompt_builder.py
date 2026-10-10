@@ -63,7 +63,7 @@ class PromptBuilder:
         return render(
             self.persona.system_prompt_template,
             owner_name=self.owner_name,
-            persona_name=self.persona.name,
+            bot_name=self.persona.bot_name or self.persona.name,
             persona_description=self.persona.description or "一个有点小脾气的陪伴机器人。",
             persona_extra=self._persona_extra(),
             current_time=current_time,

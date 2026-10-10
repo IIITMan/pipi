@@ -78,6 +78,9 @@ class PersonaSpec:
     default_voice_emotion: str = "neutral"
     system_prompt_template: str = "persona_system.jinja"
     description: str = ""
+    # ---- 人格级覆盖（定义了就盖掉全局配置，build_app 启动时应用）----
+    bot_name: str | None = None              # 皮皮自己的名字（贾维斯 → "贾维斯"）
+    wake_words: list[str] | None = None      # 独立唤醒词（["贾维斯", "jarvis"]）
 
     # ---- 从 traits 派生的行为参数（编排层直接读这些，不读 traits）----
 
@@ -129,4 +132,6 @@ class PersonaSpec:
             default_voice_emotion=data.get("default_voice_emotion", "neutral"),
             system_prompt_template=data.get("system_prompt_template", "persona_system.jinja"),
             description=data.get("description", ""),
+            bot_name=data.get("bot_name"),
+            wake_words=data.get("wake_words"),
         )
