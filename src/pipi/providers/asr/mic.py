@@ -86,17 +86,33 @@ class MicCapture:
         return max(self.min_silence_rms, self.noise_floor * self.noise_multiplier)
 
     def calibrate(self, seconds: float = 0.8) -> float:
-        """测环境噪声底，设置自适应阈值。返回噪声 RMS。"""
+        """测环境噪声底，设置自适应阈值。返回噪声 RMS。
+
+        防污染：① 取最安静 10% 块的均值（抗校准瞬间被音箱/说话干扰）；
+        ② 噪声底异常大（>8000，安静房间不该有）→ 等 1s 重测一次取小值。
+        历史教训：校准被污染会让阈值虚高到 6 万+，打断/VAD 全部失效。
+        """
         import sounddevice as sd
 
-        audio = sd.rec(int(self.sample_rate * seconds), samplerate=self.sample_rate,
-                       channels=1, dtype="int16")
-        sd.wait()
-        block = self.sample_rate // 10
-        levels = sorted(_rms(audio[i:i + block].flatten())
-                        for i in range(0, len(audio) - block + 1, block))
-        # 取中位数：抗偶发噪声
-        self.noise_floor = levels[len(levels) // 2] if levels else 0.0
+        def _measure() -> float:
+            audio = sd.rec(int(self.sample_rate * seconds),
+                           samplerate=self.sample_rate,
+                           channels=1, dtype="int16")
+            sd.wait()
+            block = self.sample_rate // 10
+            levels = sorted(_rms(audio[i:i + block].flatten())
+                            for i in range(0, len(audio) - block + 1, block))
+            if not levels:
+                return 0.0
+            quiet = levels[: max(1, len(levels) // 10)]   # 最安静 10%
+            return sum(quiet) / len(quiet)
+
+        self.noise_floor = _measure()
+        if self.noise_floor > 8000:          # 疑似校准被声音污染
+            import time
+            time.sleep(1.0)
+            self.noise_floor = min(self.noise_floor, _measure())
+            logger.warning("噪声底异常，已重测（二次取小）")
         self._calibrated = True
         logger.info("环境噪声校准：RMS=%.0f，说话阈值=%.0f",
                     self.noise_floor, self.threshold)

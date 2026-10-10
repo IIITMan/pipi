@@ -37,6 +37,7 @@ from pipi.agents.dialogue_expert import DialogueExpert, ToolCallSignal
 from pipi.agents.emotion_analyst import EmotionAnalyst
 from pipi.agents.memory_expert import MemoryExpert
 from pipi.capabilities.expression import PostProcessResult, postprocess, to_bubbles
+from pipi.capabilities.weather import WeatherService
 from pipi.capabilities.memory_manager import MemoryManager
 from pipi.domain.dialogue import Bubble, DialogueTurn, Role, Session
 from pipi.domain.emotion import EmotionState
@@ -306,6 +307,18 @@ class ConversationOrchestrator:
                         r = on_chunk(delta)
                         if asyncio.iscoroutine(r):
                             await r
+                # 规则兜底：LLM 偶尔不守工具协议（旧对话历史会强化
+                # "直接回答"模式），天气关键词命中且没查过 → 强制补跑
+                # 天气工具，携带结果重新生成（皮皮会重说一遍正确的）
+                if (attempt == 0 and streamed and not ctx.tool_brief
+                        and self.weather is not None
+                        and WeatherService.detect(user_text)):
+                    await self._run_tool(
+                        ToolCallSignal("weather", ""), ctx, vision,
+                        user_text, on_notice)
+                    raw_text = ""
+                    streamed = False
+                    continue
                 break   # 正常完成
             except ToolCallSignal as sig:
                 if streamed:

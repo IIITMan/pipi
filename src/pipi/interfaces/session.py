@@ -705,14 +705,15 @@ class InteractionSession:
         if now - self._resp_started < self.barge_arm_s:
             return
         level = _rms(frame)
-        # 打断线 = 校准的说话阈值 × 乘数（与最初版本一致，实测好用）。
-        # 曾加过"回声 EMA 抬线"防自触发 —— 实测 ark_tts 外放音量大，
-        # 回声把线顶到正常说话音量之上，打断直接失效，已移除。
-        # 防自触发靠：arm_s 冷却（播报开头不检测）+ KWS 叫名通道的 2s 延迟
-        line = self.capture.threshold * self.barge_mult
-        # 回声基线（EMA）仅作诊断观察，不再参与打断判定
+        # 回声基线（EMA）：皮皮自己的播报被麦克风拾回的水平
         self._echo_rms = (0.8 * self._echo_rms + 0.2 * level
                           if self._echo_rms else level)
+        # 打断线 = 回声基线 × 3（自适应门限）。
+        # 不用"校准说话阈值"：启动校准若被声音污染（噪声底虚高数万），
+        # 打断线会远超正常说话音量，永远够不到 —— 2026-10 实测的失效根因。
+        # 回声 EMA 平滑跟随播报声，皮皮自己不会越过自身 3 倍线；用户一开口
+        # RMS 突增即过线。下限防极安静环境误触。
+        line = max(self._echo_rms * 3.0, 600.0)
         if level >= line:
             if self._loud_frames == 0:
                 # 用户声音起点：从这里截取缓冲作为打断后的句子开头
