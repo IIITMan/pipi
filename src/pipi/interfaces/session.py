@@ -288,6 +288,10 @@ class InteractionSession:
         self.barge_min_ms = cfg.get("audio.mic.session.barge_in_min_ms", 200)
         self.barge_arm_s = cfg.get("audio.mic.session.barge_in_arm_s", 0.6)
         self.barge_mult = cfg.get("audio.mic.session.barge_in_multiplier", 1.6)
+        # 播报声被麦克风拾回（无 AEC）抬高打断线：回声基线 × 此乘数。
+        # 音箱外放嫌难打断可降到 1.2；戴耳机/回声小可升回 1.4 防自触发
+        self.barge_echo_mult = cfg.get(
+            "audio.mic.session.barge_in_echo_mult", 1.25)
         self._echo_rms = 0.0            # 扬声器回声 RMS 基线（EMA，打断线用）
 
         # 唤醒应答预热：后台提前合成并缓存，首次唤醒即零延迟
@@ -366,6 +370,7 @@ class InteractionSession:
         self._resp_started = time.monotonic()
         self._loud_frames = 0
         self._pending = []
+        self.kws.reset()
         self._resp_task = asyncio.create_task(self._speak_spontaneous(text))
         return True
 
@@ -386,6 +391,7 @@ class InteractionSession:
         self._loud_frames = 0
         self._exit_pending = True
         self._pending = []
+        self.kws.reset()
         self._resp_task = asyncio.create_task(
             self._speak_line(random.choice(self.exit_farewells)))
 
@@ -495,6 +501,19 @@ class InteractionSession:
             return
 
         if self.state == self.RESPOND:
+            # 播报期间的「叫名打断」：KWS 持续扫描，喊「皮皮」强制打断。
+            # 音箱外放无回声消除，纯能量打断线会被皮皮自己的播报声抬高
+            # （正常说话音量够不到），唤醒词与播报内容区分度大，最可靠。
+            # 开播 2s 内不启用（防自我介绍里的「皮皮」自触发）。
+            if now - self._resp_started > 2.0 and not self._exit_pending:
+                try:
+                    hit = await self.kws.process(frame)
+                except Exception:
+                    hit = False
+                if hit:
+                    self._notify("  （听到「皮皮」，打断）")
+                    self._do_barge_in(now)
+                    return
             self._step_respond(frame, now)
 
     # -- 阶段 1：待机（VAD 攒段 + KWS 扫描，命中才送 ASR）--------------
@@ -653,6 +672,7 @@ class InteractionSession:
     async def _safe_query(self, text: str) -> None:
         if self.on_query is None:
             return
+        self.kws.reset()   # 清掉唤醒命中的流式残留（播报期间 KWS 要继续跑）
         try:
             await self.on_query(text)
         except asyncio.CancelledError:
@@ -695,7 +715,7 @@ class InteractionSession:
             self._echo_rms = (0.8 * self._echo_rms + 0.2 * level
                               if self._echo_rms else level)
         line = max(self.capture.threshold * self.barge_mult,
-                   self._echo_rms * 1.4)
+                   self._echo_rms * self.barge_echo_mult)
         if level >= line:
             if self._loud_frames == 0:
                 # 用户声音起点：从这里截取缓冲作为打断后的句子开头
@@ -733,6 +753,7 @@ class InteractionSession:
         self._last_voice = now
         self._exit_pending = False   # 用户插话=改主意了，取消退出
         self._pre_frames.clear()
+        self.kws.reset()             # KWS 命中过，清流式状态防残留误触发
         self._ignore_until = 0.0     # 立即监听，不再丢 0.4s
 
     def _back_to_listen(self, now: float) -> None:
