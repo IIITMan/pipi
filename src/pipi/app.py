@@ -433,6 +433,7 @@ def build_app(cfg: Config | None = None, *, sim: bool = False,
         use_cheap_routing=cfg.get("llm.routing.enabled", True),
         simple_max_chars=cfg.get("llm.routing.simple_max_chars", 8),
         growth=growth_engine,
+        city=cfg.get("weather.city", "济南"),   # 全局城市 → 意图协议注入
     )
 
     # 编排器

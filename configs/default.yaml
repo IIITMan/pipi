@@ -63,10 +63,10 @@ llm:
   # 机器人的名字（与人格名区分：人格是"傲娇"，名字是"皮皮"）
   bot_name: "皮皮"
   # ① 主对话模型：闲聊 / 共情 / 有性格的回应
-  #    火山方舟推理接入点（= doubao-seed-2-1-pro，见控制台在线推理）
-  model: "ep-20261008132938-nzfds"
-  # ② 便宜模型：记忆抽取 / 情感分析 / 观测摘要（也走 Pro，不用 lite）
-  cheap_model: "ep-20261008132938-nzfds"
+  #    实际值在 configs/local.yaml（ep-20261010183308-wqd6d，2026-10-10 更换）
+  model: "ep-20261010183308-wqd6d"
+  # ② cheap 路由（短句/抽取）不再单独设模型 —— 留空回落到 model
+  cheap_model: ""
   timeout_s: 30
   max_retries: 2
   # 透传给 API 的额外字段。

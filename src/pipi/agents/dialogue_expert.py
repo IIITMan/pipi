@@ -30,18 +30,27 @@ _TOOL_RE = re.compile(
 # 意图标签（用户要求：回复必须先声明意图；闲聊显式化便于日志与兜底判定）
 _INTENT_RE = re.compile(r"^\s*\[(闲聊|聊天)\]\s*")
 
-TOOL_PROTOCOL = (
-    "\n\n# 回复格式（每轮必须严格遵守）\n"
-    "回复的第一行先输出意图标签，再输出正文，格式二选一：\n"
-    "① 不需要外部信息时（闲聊/情感/时间/关于皮皮自己/对皮皮的请求）：\n"
-    "   [闲聊]正文……（标签与正文同一行，正文用你的口吻直接回答）\n"
-    "② 需要外部实时信息时，第一行只输出工具标记然后立即停止\n"
-    "（系统查到资料后会让你重新回答）：\n"
-    "   [WEATHER:城市]  —— 天气/气温/降雨类\n"
-    "   [SEARCH:关键词] —— 百科/人物/新闻/历史事件等外部资料\n"
-    "   [VISION:要点]   —— 需要看摄像头画面（用户问穿着/表情/能否看见/在干什么）\n"
-    "绝对不要不打标签直接回答。\n"
-)
+def tool_protocol(city: str = "") -> str:
+    """工具/意图协议（动态：城市由 weather.city 全局配置注入）。"""
+    city_line = (f"用户所在城市：{city}。问天气时 [WEATHER:{city}] 直接填它，"
+                 f"不要反问城市名。\n" if city else
+                 "[WEATHER:城市] 直接填用户所在城市（系统配置里有），"
+                 "不要反问城市名。\n")
+    return (
+        "\n\n# 回复格式（每轮必须严格遵守）\n"
+        "回复的第一行先输出意图标签，再输出正文，格式二选一：\n"
+        "① 不需要外部信息时（闲聊/情感/时间/关于皮皮自己/对皮皮的请求）：\n"
+        "   [闲聊]正文……（标签与正文同一行，正文用你的口吻直接回答）\n"
+        "② 需要外部实时信息时，第一行只输出工具标记然后立即停止\n"
+        "（系统查到资料后会让你重新回答）：\n"
+        f"   [WEATHER:城市]  —— 天气/气温/降雨类。{city_line}"
+        "   [SEARCH:关键词] —— 百科/人物/新闻/历史事件等外部资料\n"
+        "   [VISION:要点]   —— 需要看摄像头画面（用户问穿着/表情/能否看见/在干什么）\n"
+        "绝对不要不打标签直接回答。\n"
+    )
+
+
+TOOL_PROTOCOL = tool_protocol()   # 兼容旧引用（无城市版）
 
 
 class ToolCallSignal(Exception):
@@ -60,12 +69,13 @@ class DialogueExpert(BaseAgent):
 
     def __init__(self, llm: LLMProvider, prompt_builder: PromptBuilder,
                  use_cheap_routing: bool = True, simple_max_chars: int = 8,
-                 growth: Any | None = None):
+                 growth: Any | None = None, city: str = ""):
         self.llm = llm
         self.pb = prompt_builder
         self.use_cheap_routing = use_cheap_routing
         self.simple_max_chars = simple_max_chars
         self.growth = growth              # 场景路由需要阶段/学习表达
+        self.city = city                  # 全局城市（weather.city 注入协议）
         self._quote_count: dict[str, int] = {}   # D4：每会话引用上限
 
     def _stage_of(self, ctx: AgentContext) -> int:
@@ -119,7 +129,7 @@ class DialogueExpert(BaseAgent):
                       f"基于它回答，用你的口吻：{ctx.tool_brief}")
 
         if tool_round == 0:
-            extra += TOOL_PROTOCOL
+            extra += tool_protocol(self.city)
         else:
             # 第二轮（工具已执行）：严禁再输出标记，直接以皮皮口吻回答
             extra += ("\n\n[系统] 查询已完成：资料可用就用，查不到/超时"

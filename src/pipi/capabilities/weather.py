@@ -60,7 +60,7 @@ class WeatherService:
     def __init__(self, city: str = "济南", cache_seconds: int = 1800):
         self.city = city
         self.cache_seconds = cache_seconds
-        self._cache: tuple[float, str | None] | None = None
+        self._caches: dict[str, tuple[float, str | None]] = {}   # 按城市分缓存
         self._kind: str | None = None        # 最近一次成功查询的粗类别
         self._last_uapis_weather: str = ""   # 最近一次的天气文字（粗分类用）
         self._last_notified: str | None = None
@@ -104,29 +104,33 @@ class WeatherService:
 
     # ------------------------------------------------------------------
 
-    async def fetch(self) -> str | None:
-        """查一次（带 30 分钟缓存）。失败返回 None → 对话不注入，照常回答。
+    async def fetch(self, city: str | None = None) -> str | None:
+        """查一次（按城市缓存 30 分钟）。失败返回 None → 对话不注入。
 
+        city=None 用配置的默认城市；查外地（"北京天气"）传城市名 —— UAPIs
+        天然支持任意城市，按城市分缓存。
         成功时同步粗类别（_kind）并通知订阅者（类别变化才推）——
         生命模块据此调制心境。
         """
         now = time.time()
-        if self._cache is not None and now - self._cache[0] < self.cache_seconds:
-            return self._cache[1]
-        text = await self._fetch_uapis()
+        city = (city or self.city).strip() or self.city
+        cache = self._caches.get(city)
+        if cache is not None and now - cache[0] < self.cache_seconds:
+            return cache[1]
+        text = await self._fetch_uapis(city)
         if text is None:
-            self._cache = (now, None)
+            self._caches[city] = (now, None)
             return None
-        self._cache = (now, text)
+        self._caches[city] = (now, text)
         kind = self._kind_uapis()
         self._kind = kind or self._kind
-        if kind:
+        if kind and city == self.city:   # 只有主城市天气调制心境
             self._notify(kind)
         return text
 
-    async def _fetch_uapis(self) -> str | None:
+    async def _fetch_uapis(self, city: str) -> str | None:
         """UAPIs 天气（城市名直查，国内直连 ~0.1s，免费无 key）。"""
-        params = {"city": self.city, "extended": "true", "forecast": "true"}
+        params = {"city": city, "extended": "true", "forecast": "true"}
         url = f"{self._UAPI_URL}?{urllib.parse.urlencode(params)}"
         try:
             data = await asyncio.to_thread(self._get, url, 6.0)
@@ -135,13 +139,13 @@ class WeatherService:
             return None
         try:
             self._last_uapis_weather = str(data.get("weather") or "")
-            return self._render_uapis(data)
+            return self._render_uapis(data, city)
         except Exception as exc:
             logger.warning("UAPIs 天气渲染失败：%s", exc)
             return None
 
-    def _render_uapis(self, d: dict) -> str:
-        parts = [f"{self.city}今天：{d.get('weather', '未知')}"]
+    def _render_uapis(self, d: dict, city: str) -> str:
+        parts = [f"{city}今天：{d.get('weather', '未知')}"]
         tmax, tmin = d.get("temp_max"), d.get("temp_min")
         if tmax is not None and tmin is not None:
             parts.append(f"{tmin:.0f}~{tmax:.0f}°C")

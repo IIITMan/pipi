@@ -1,4 +1,4 @@
-"""会话编排器 —— 系统的主循环。
+﻿"""会话编排器 —— 系统的主循环。
 
 一次完整对话的数据流：
 
@@ -59,6 +59,32 @@ logger = logging.getLogger(__name__)
 _VISION_KEYS = ("看见我", "看得见", "你能看见", "我长什么样", "我在干什么",
                 "我在干嘛", "我穿着", "我戴", "什么表情", "看看我",
                 "我手里", "我拿着", "我在做")
+
+_RE_PREFIX_VERB = re.compile(r"^(帮我看|帮我查|看一下|看看|查一下|查|帮我|麻烦)")
+
+
+def _extract_city(text: str) -> str | None:
+    """从用户话里提取城市名（"看一下北京天气"→北京）。无地名返回 None。"""
+    t = (text or "").strip()
+    if (re.fullmatch(r"[\u4e00-\u9fa5]{2,6}", t)
+            and not re.search(r"天气|气温|温度|雨|雪|怎么样|如何|好吗", t)):
+        # 纯城市名（LLM 标记路径 [WEATHER:上海]）
+        return None if t in ("天气", "当地", "今天") else t
+    t = _RE_PREFIX_VERB.sub("", t)
+    m = re.search(r"([\u4e00-\u9fa5]{2,6})(?:今天|明天|后天|现在|的)*"
+                  r"(?:天气|气温|温度|降雨|下雨|下雪|降温|升温|热不热|冷不冷)", t)
+    if not m:
+        return None
+    city = m.group(1)
+    for noise in ("今天", "明天", "现在", "外面", "这边", "当地", "室内"):
+        if city.startswith(noise):
+            city = city[len(noise):]
+    for tail in ("会不会", "有没有", "是不是", "明天", "今天", "后天",
+                 "现在", "还", "的", "了"):
+        if city.endswith(tail) and len(city) > 2:
+            city = city[:-len(tail)]
+    city = city.strip("的了").strip()
+    return city if 2 <= len(city) <= 6 else None
 
 
 @dataclass
@@ -218,10 +244,20 @@ class ConversationOrchestrator:
         if isinstance(mem_res, Exception):
             logger.warning("记忆检索 Agent 失败：%s", mem_res)
 
+        # ---- 规则意图前置（与非流式路径同策略）：先跑工具再生成 ----
+        pre: ToolCallSignal | None = None
+        if self.weather is not None and WeatherService.detect(user_text):
+            pre = ToolCallSignal("weather", user_text)
+        elif vision is not None and any(k in user_text for k in _VISION_KEYS):
+            pre = ToolCallSignal("vision", user_text)
+        start_round = 1 if pre is not None else 0
+        if pre is not None:
+            await self._run_tool(pre, ctx, vision, user_text, on_notice)
+
         # ---- 生成（工具标记 → 执行工具 → 携带结果重生成，最多 2 轮）----
         raw_text = ""
         degraded = False
-        for attempt in range(2):
+        for attempt in range(start_round, start_round + 2):
             try:
                 gen_res = await self.dialogue_expert.run(ctx, tool_round=attempt)
                 if not gen_res.ok or gen_res.data is None:
@@ -297,11 +333,23 @@ class ConversationOrchestrator:
         if isinstance(mem_res, Exception):
             logger.warning("记忆检索 Agent 失败：%s", mem_res)
 
+        # ---- 规则意图前置：高频意图不经 LLM 标记，直接先跑工具 ----
+        # （LLM 偶尔不守协议会"先答错再兜底重说"，前置路由一次到位）
+        start_round = 0
+        pre: ToolCallSignal | None = None
+        if self.weather is not None and WeatherService.detect(user_text):
+            pre = ToolCallSignal("weather", user_text)
+        elif vision is not None and any(k in user_text for k in _VISION_KEYS):
+            pre = ToolCallSignal("vision", user_text)
+        if pre is not None:
+            await self._run_tool(pre, ctx, vision, user_text, on_notice)
+            start_round = 1     # 工具结果已就位 → 直接以第二轮（禁标记）生成
+
         # ---- 流式生成（工具标记 → 执行工具 → 携带结果重生成，最多 2 轮）----
         raw_text = ""
         degraded = False
         streamed = False
-        for attempt in range(2):
+        for attempt in range(start_round, start_round + 2):
             streamed = False
             try:
                 async for delta in self.dialogue_expert.stream(
@@ -319,7 +367,7 @@ class ConversationOrchestrator:
                 if attempt == 0 and streamed and not ctx.tool_brief:
                     if self.weather is not None \
                             and WeatherService.detect(user_text):
-                        forced = ToolCallSignal("weather", "")
+                        forced = ToolCallSignal("weather", user_text)
                     elif vision is not None and any(
                             k in user_text for k in _VISION_KEYS):
                         forced = ToolCallSignal("vision", user_text)
@@ -386,9 +434,10 @@ class ConversationOrchestrator:
                 pass
         try:
             if tool == "weather" and self.weather is not None:
-                # 9s：首次含定位（wttr.in ~2s + forecast ~1s，含失败重试）；
-                # 坐标进程内缓存后，日常 <1s
-                brief = await asyncio.wait_for(self.weather.fetch(), timeout=9.0)
+                # 城市优先级：话里提到的地名 > 配置默认城市
+                city = _extract_city(query or user_text)
+                brief = await asyncio.wait_for(
+                    self.weather.fetch(city=city), timeout=9.0)
                 if brief:
                     ctx.tool_brief = brief
                     logger.info("天气工具命中：%s", brief)
@@ -719,9 +768,11 @@ class ConversationOrchestrator:
     def _strip_reasoning(self, text: str) -> str:
         """思考腔泄漏防护：模型偶发把解题过程当答案输出（尤其 lite 档）。
 
+        另剥离漏网的意图标签（[闲聊] 等 —— 流式路径已剥，非流式在此兜底）。
         特征：多段落 + 推理特征词。命中时取最后一个自然段——
         那通常才是真正的台词。
         """
+        text = re.sub(r"^\s*\[(闲聊|聊天)\]\s*", "", text, count=1)
         if "\n" not in text:
             return text
         hits = sum(1 for k in self._REASONING_MARKERS if k in text)

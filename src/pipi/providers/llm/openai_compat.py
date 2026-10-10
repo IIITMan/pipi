@@ -370,7 +370,9 @@ def create_llm(provider: str, api_key: str, base_url: str = "",
         base_url=base_url or preset.get("base_url", ""),
         api_key=api_key,
         model=model or preset.get("model", "qwen3-flash"),
-        cheap_model=cheap_model or preset.get("cheap_model"),
+        # 注意：cheap_model 传 "" 表示显式不分级（回落 model）——
+        # 不能用 preset 值顶上，否则配置层的意图会被 preset 悄悄覆盖
+        cheap_model=cheap_model,
         name=provider,
         extra_body=extra_body,
         **kwargs,
