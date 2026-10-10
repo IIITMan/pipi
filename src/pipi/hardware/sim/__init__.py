@@ -22,11 +22,21 @@ class OpenCVCamera:
         import threading
         self._lock = threading.Lock()   # VideoCapture 非线程安全，串行化 read
 
+    @staticmethod
+    def _quiet_cv2(cv2_mod) -> None:
+        """压掉 OpenCV 的 stderr 警告（DSHOW 探测重试时的
+        "can't be used to capture by index" / C++ exception 噪音）。"""
+        try:
+            cv2_mod.setLogLevel(cv2_mod.LOG_LEVEL_ERROR)
+        except Exception:
+            pass
+
     def is_available(self) -> bool:
         try:
             import cv2
         except ImportError:
             return False
+        self._quiet_cv2(cv2)
         # Windows 摄像头句柄释放有延迟（前一个进程刚退出/重启竞争），
         # 探测失败时重试几次再下结论
         import time
@@ -46,6 +56,7 @@ class OpenCVCamera:
     def _open_sync(self):
         """阻塞的 VideoCapture 构造（DSHOW 初始化 1~3s），只允许在工作线程跑。"""
         import cv2
+        self._quiet_cv2(cv2)
         cap = cv2.VideoCapture(self.index, cv2.CAP_DSHOW)
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
