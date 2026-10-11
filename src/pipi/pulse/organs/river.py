@@ -1,18 +1,17 @@
 """River 生命流 —— 不可逆的河，入睡后"做梦"整理（PULSE_DESIGN §4.7 / P4）。
 
-day_stream 不可逆追加；入睡 consolidate_night() 把一天压缩为叙事。
-P4：叙事由"当天真实经历统计"生成（非 LLM：模板 × 真实数字 × 确定性变体），
-每晚生成一篇不同措辞的"日记"；self_depth 递增，醒来自我更厚。
-无 diary 参数时回退旧模板（P0 脚本兼容）。
+8→4 精简（消融证据：禁用后日记质量塌缩、自我深度冻结、认主推进停滞，
+但 5000 条 day_stream 缓冲无独立价值）：
+  - 删除 day_stream/record：当天事件已由 loop._diary 记录，consolidate
+    直接用传入的当天统计，不保留第二份缓冲
+  - 保留 self_depth / nights / 叙事模板：跨天整理（认主日历推进、自我
+    变厚、零 LLM 成文）是它的核心价值
 """
 
 from __future__ import annotations
 
 import random
-from collections import deque
 from typing import Any
-
-from pipi.pulse.config import RIVER
 
 # 事件 → 日记句（文本 + 权重；变体由 rng 挑选，措辞每天不同）
 _EVENT_LINES = {
@@ -69,46 +68,27 @@ _EVENT_LINES = {
 
 class River:
     def __init__(self, cfg: dict | None = None):
-        cfg = cfg or RIVER
-        self.cfg = cfg
-        self.day_stream: deque = deque(maxlen=cfg["stream_maxlen"])
+        self.cfg = cfg or {}
         self.self_depth = 1
         self.nights = 0
         self._rng = random.Random(3)
 
     # ------------------------------------------------------------------
 
-    def record(self, entry: dict) -> None:
-        """行为刻度追加（不可逆）。"""
-        self.day_stream.append(entry)
-
     def consolidate_night(self, diary: dict | None = None) -> str:
         """入睡整理：回放一天 → 压缩为叙事（P4：真实经历成文，零 LLM）。
 
-        diary：当天统计 {kinds: {kind: n}, weather: {label: n}, longing_peak: 0..1}。
-        无 diary 时用片段计数兜底（P0 兼容）。
+        diary：当天统计 {kinds: {kind: n}, weather: {label: n}, longing_peak: 0..1,
+                events: [{kind, text}]}（由 LivingLoop.consolidate_night 构建）。
+        无 diary 时回退安静叙事（独立仿真兼容）。
         """
-        entries = list(self.day_stream)
         self.nights += 1
         self.self_depth += 1
 
         if diary is None:
-            kinds: dict[str, int] = {}
-            for e in entries:
-                k = e.get("kind", "other")
-                kinds[k] = kinds.get(k, 0) + 1
-            if not entries:
-                narrative = "今天没什么特别的事，很安静的一天。"
-            else:
-                parts = [f"{k}×{v}" for k, v in sorted(kinds.items(),
-                                                        key=lambda x: -x[1])[:4]]
-                narrative = f"今天发生了 {len(entries)} 个片段（{('，'.join(parts))}）。"
-            self.day_stream.clear()
-            return narrative
+            return "今天没什么特别的事，很安静的一天。"
 
-        narrative = self._narrative(diary)
-        self.day_stream.clear()
-        return narrative
+        return self._narrative(diary)
 
     # ------------------------------------------------------------------
 

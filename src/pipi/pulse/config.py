@@ -5,24 +5,6 @@ P0 数值验证直接使用本表默认值。
 
 from __future__ import annotations
 
-# ---- Anticipation 预感（§4.2）----
-# scale：该键观测偏差的归一化尺度（相对偏差 = |obs-expected| / scale，clamp 0..1）
-# conf 随样本上升至 0.9
-ANTICIPATION = {
-    "startle_threshold": 0.55,
-    "curious_threshold": 0.25,
-    "max_confidence": 0.9,
-    "conf_step": 0.15,          # 每样本 confidence 增量
-    "conf_init": 0.3,
-    "keys": {
-        "owner_morning_depart": {"expected": 450.0, "scale": 1800.0},   # 分钟
-        "owner_evening_return": {"expected": 1140.0, "scale": 1800.0},  # 分钟
-        "night_noise": {"expected": 0.0, "scale": 1.0},                 # 夜间噪声 = 异常
-        "stranger": {"expected": 0.0, "scale": 1.0},                    # 陌生人 = 异常
-        "owner_expression": {"expected": 0.0, "scale": 1.0},            # 低落表情 = 异常
-    },
-}
-
 # ---- Tension 潮汐（§4.3）----
 # k：回归惯性（值/秒）；target 由情境评估给出
 TENSION = {
@@ -72,11 +54,6 @@ BOND = {
     "reunion_trust_gain_long": 0.8,  # 久别级重聚信任奖励
     "neglect_trust_loss": 0.5,     # 冷淡重聚（无视）信任损失
     "neglect_mood": -0.25,         # 冷淡重聚情绪失落
-}
-
-# ---- River 生命流（§4.7）----
-RIVER = {
-    "stream_maxlen": 5000,
 }
 
 # ---- Seed 种子（§4.8 / P4：塑性按"周龄"分段，成长可见但不失控）----

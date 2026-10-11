@@ -89,14 +89,7 @@ def disable_organ(loop: LivingLoop, organ: str) -> None:
     8→4 精简后 Rhythm/Affect 已无独立对象（降为派生），不再参与消融；
     其余器官与 full 对比。
     """
-    if organ == "anticipation":
-        # 预感恒 calm：无惊吓/好奇判定（事件仍注入，但不再产生 surprise）
-        def _update(key, observed):
-            from pipi.pulse.organs.anticipation import Surprise
-            return Surprise(level=0.0, kind="calm", key=key)
-        loop.anticipation.update = _update
-        loop.anticipation.learn = lambda key, obs: None
-    elif organ == "tension":
+    if organ == "tension":
         # 驱力场冻结：waves 恒定 0.2，无涟漪无惯性
         def _update(dt, targets, sleeping=False):
             from pipi.pulse.organs.tension import TensionSnapshot
@@ -124,8 +117,7 @@ def disable_organ(loop: LivingLoop, organ: str) -> None:
                                        "text": "凑过去蹭了蹭"}
         loop.bond.advance_days = lambda n=1.0: None
     elif organ == "river":
-        # 生命流不记录：无日记叙事、self_depth 不增长
-        loop.river.record = lambda entry: None
+        # 生命流不整理：无日记叙事、self_depth 不增长（仍推进认主日历由 loop 侧驱动）
         loop.river.consolidate_night = lambda diary=None: ""
     elif organ == "seed":
         # 种子不漂移：五维恒基线（仍可读 profile）
@@ -219,8 +211,7 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=20261008)
     args = ap.parse_args()
 
-    organs = ["full", "anticipation", "tension",
-              "will", "bond", "river", "seed"]
+    organs = ["full", "tension", "will", "bond", "river", "seed"]
     modes = ("random", "intimate", "busy")
 
     result: dict = {}

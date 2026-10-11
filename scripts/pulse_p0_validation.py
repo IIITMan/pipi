@@ -28,7 +28,6 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from pipi.pulse import derive
-from pipi.pulse.organs.anticipation import Anticipation
 from pipi.pulse.organs.tension import TensionField
 from pipi.pulse.organs.will import Will
 from pipi.pulse.organs.bond import Bond
@@ -96,7 +95,6 @@ def evening_targets(owner_present: bool, bond: Bond) -> dict:
 
 # ---------------------------------------------------------------- 主循环
 async def main() -> dict:
-    anticipation = Anticipation()
     tension = TensionField()
     will = Will()
     bond = Bond()
@@ -104,6 +102,9 @@ async def main() -> dict:
     seed = Seed()
     seed.set_depth(1)
     bond.set_days_since_adoption(0.2)     # 领养 0.2 天，认主关键期内
+
+    # 简化习惯化（8→4：原 Anticipation 只剩"异常事件终身只吓一次"）
+    habit_done = {"stranger": False, "night_noise": False}
 
     # 派生展示状态（8→4：原 Rhythm/Affect 器官的数值，见 pulse/derive.py）
     rate, depth, phase = derive.BASE_RATE_BPM, 0.4, 0.0
@@ -165,10 +166,8 @@ async def main() -> dict:
             if kind == "owner_depart":
                 owner_present = False
                 sep_min = 0.0
-                anticipation.learn("owner_morning_depart", minute % 1440)
             elif kind == "owner_arrive":
                 owner_present = True
-                anticipation.learn("owner_evening_return", minute % 1440)
                 # 重聚：精神一振（孤独即时消解 + 底色回暖）
                 boost = bond.on_reunion()
                 mood_base = derive.clamp(mood_base + boost["mood"], -1.0, 1.0)
@@ -178,41 +177,31 @@ async def main() -> dict:
                 tension.push("loneliness", -0.45)
                 mood_base = derive.clamp(mood_base + 0.20, -1.0, 1.0)
                 bond.interact()
-                river.record({"kind": "chat", "t_min": round(minute, 1)})
             elif kind == "quiet_home":
                 quiet_home_until = t + dur * MIN
                 owner_present = True
             elif kind == "stranger":
-                sur = anticipation.update("stranger", 1.0)
-                anticipation.learn("stranger", 1.0)
-                if sur.kind == "startle":
+                if not habit_done["stranger"]:
+                    habit_done["stranger"] = True
                     startle_count += 1
                     burst = 0.9
                     mood_pulse = derive.clamp(mood_pulse + 0.60, 0.0, 1.0)
                     tension.push("security", -0.45)
                     seed.drift("sensitivity", +1.0)
-                    river.record({"kind": "startle", "t_min": round(minute, 1)})
-                elif sur.kind == "curious":
-                    curiosity_count += 1
                 alert_until = t + 30 * MIN
                 curious_until = t + 10 * MIN
             elif kind == "owner_sad":
-                sur = anticipation.update("owner_expression", 1.0)
-                anticipation.learn("owner_expression", 1.0)
                 mood_base = derive.clamp(mood_base - 0.30, -1.0, 1.0)
                 tension.push("attachment", +0.25)
                 bond.interact()                    # 关心也是共同经历
-                river.record({"kind": "concern", "t_min": round(minute, 1)})
             elif kind == "night_noise":
-                sur = anticipation.update("night_noise", 1.0)
-                anticipation.learn("night_noise", 1.0)
-                if sur.kind == "startle":
+                if not habit_done["night_noise"]:
+                    habit_done["night_noise"] = True
                     startle_count += 1
                     burst = 0.9
                     mood_pulse = derive.clamp(mood_pulse + 0.60, 0.0, 1.0)
                     tension.push("security", -0.4)
                     seed.drift("sensitivity", +0.8)
-                    river.record({"kind": "startle", "t_min": round(minute, 1)})
                 alert_until = t + 20 * MIN
 
         # ---- 持续状态推进 ----
@@ -252,11 +241,7 @@ async def main() -> dict:
                         intent_changes += 1
                     prev_intent = intent.kind
 
-        # 生命流每分钟一条
-        if int(t) % 60 == 0:
-            river.record({"kind": "idle", "t_min": round(minute, 1)})
-
-        # ---- 采样（每 10min）----
+        # 采样（每 10min）
         if step % SAMPLE_EVERY == 0:
             rows.append({
                 "t_min": round(minute, 1),

@@ -11,7 +11,6 @@ import time
 from typing import Any
 
 from pipi.pulse import derive
-from pipi.pulse.organs.anticipation import Anticipation
 from pipi.pulse.organs.bond import Bond
 from pipi.pulse.organs.river import River
 from pipi.pulse.organs.seed import Seed
@@ -27,7 +26,6 @@ class LivingLoop:
 
     def __init__(self, cfg: dict | None = None):
         cfg = cfg or {}
-        self.anticipation = Anticipation(cfg.get("anticipation"))
         self.tension = TensionField(cfg.get("tension"))
         self.will = Will(cfg.get("will"))
         self.bond = Bond(cfg.get("bond"))
@@ -36,6 +34,11 @@ class LivingLoop:
         self.seed.set_depth(1)
         self.bond.set_days_since_adoption(0.2)     # 领养 0.2 天，认主关键期
         self.body = Body()
+
+        # 简化习惯化（8→4：原 Anticipation 器官只剩两个行为门控）
+        self._expected_return = 19.0 * 60 + 30    # 傍晚例行归预期（分钟，EMA 学习）
+        self._habit_done: dict[str, bool] = {     # 异常事件终身习惯化（只吓一次）
+            "stranger": False, "night_noise": False}
 
         # 派生展示状态（8→4：原 Affect/Rhythm 器官降为派生值，见 derive.py）
         self._mood_base = derive.MOOD_BASELINE   # 心境底色（事件 push，τ=1h 回归）
@@ -98,8 +101,7 @@ class LivingLoop:
 
     # ------------------------------------------------------------- 当天日记
     def _note(self, kind: str, minute: float, text: str = "") -> None:
-        """行为刻度写入生命流 + 当天日记（不可逆，供入睡成文）。"""
-        self.river.record({"kind": kind, "t": round(minute, 1), "text": text})
+        """当天日记（不可逆，供入睡成文）。"""
         self._diary.append({"kind": kind, "t": round(minute, 1), "text": text})
 
     # ------------------------------------------------------------- 事件注入
@@ -114,7 +116,6 @@ class LivingLoop:
         if kind == "owner_depart":
             self.owner_present = False
             self.sep_min = 0.0
-            self.anticipation.learn("owner_morning_depart", minute)
             self._note("owner_depart", minute)
             return "目送主人出门"
         if kind == "owner_arrive":
@@ -125,9 +126,10 @@ class LivingLoop:
             hour = (minute % 1440.0) / 60.0
             early = 0.0
             if 16.0 <= hour < 23.0:
-                exp = self.anticipation.expected("owner_evening_return")
-                self.anticipation.learn("owner_evening_return", minute)
-                early = (exp - minute) if exp is not None else 0.0
+                exp = self._expected_return
+                self._expected_return = int(0.7 * self._expected_return
+                                            + 0.3 * minute)   # EMA 作息学习
+                early = exp - minute
             if early > 30.0:
                 self.trigger_burst(0.5)
                 self.push_mood_base(0.25)
@@ -179,36 +181,30 @@ class LivingLoop:
             self._note("quiet_home", minute)
             return "安静陪着主人"
         if kind == "stranger":
-            sur = self.anticipation.update("stranger", 1.0)
-            self.anticipation.learn("stranger", 1.0)
+            # 简化习惯化：异常事件终身只吓一次（原 Anticipation 的 conf 学习
+            # 收敛后即为"永久不再吓"，此处直接表达结果）；之后警觉但不惊
             self.alert_until = self.sim_seconds + 30 * MIN
             self.curious_until = self.sim_seconds + 10 * MIN
-            if sur.kind == "startle":
+            if not self._habit_done["stranger"]:
+                self._habit_done["stranger"] = True
                 self.stats["startle"] += 1
                 self._do_startle()
                 self.will.interrupt()      # P2：惊吓打断当前意图
                 self.seed.drift("sensitivity", +1.0)
                 self._note("stranger", minute)
                 return "身体一僵！警觉地盯着门口"
-            if sur.kind == "curious":
-                self.stats["curious"] += 1
-                self._note("stranger", minute)
-                return "歪头打量来人"
             self._note("stranger", minute)
             return "注意到有人"
         if kind == "owner_sad":
-            self.anticipation.update("owner_expression", 1.0)
-            self.anticipation.learn("owner_expression", 1.0)
             self.push_mood_base(-0.30)
             self.tension.push("attachment", +0.25)
             self.bond.interact()
             self._note("owner_sad", minute)
             return "安静地挨到主人身边"
         if kind == "night_noise":
-            sur = self.anticipation.update("night_noise", 1.0)
-            self.anticipation.learn("night_noise", 1.0)
             self.alert_until = self.sim_seconds + 20 * MIN
-            if sur.kind == "startle":
+            if not self._habit_done["night_noise"]:
+                self._habit_done["night_noise"] = True
                 self.stats["startle"] += 1
                 self._do_startle()
                 self.will.interrupt()      # P2：惊吓打断当前意图
