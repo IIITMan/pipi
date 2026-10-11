@@ -1,8 +1,9 @@
 # PULSE · 心搏 —— 真实系统接入说明
 
-> 状态：✅ 已接入（`pulse.backend: "pulse"` 默认启用；`"legacy"` 可一键回退旧 LifeEngine）
+> 状态：✅ 已接入（PULSE 心搏为唯一生命引擎；8→4 精简后旧 LifeEngine 与 `pulse.backend`
+> 回退开关均已删除）
 > 说明：LivingLoop 通过 `PulseRuntime`（`src/pipi/pulse/runtime.py`）适配现有系统，
-> 对外接口与旧 LifeEngine 完全兼容，`session/cli` 无需改动即可切换。
+> `session/cli` 直接调用 runtime 接口。
 
 ## 1. 接入架构
 
@@ -23,7 +24,7 @@
 ```
 
 - **时间 1:1**：1 仿真秒 = 1 真实秒 → 思念/认主/成长按真实天数演化（1 天 = 1440 拍）；
-- **零 LLM**：呼吸/潮汐/预感/羁绊/日记全部本地确定性动力学，自发话语为固定句库兜底
+- **零 LLM**：驱力/羁绊/日记全部本地确定性动力学，自发话语为固定句库兜底
   （生产可换 LLM 渲染，接口不变）。
 
 ## 2. 事件映射
@@ -44,11 +45,18 @@
 
 ```yaml
 pulse:
-  backend: "pulse"          # pulse（LivingLoop）| legacy（旧引擎回退）
+  enabled: true             # PULSE 心搏总开关
   tick_s: 1.0               # 心搏 1Hz
   vocal_cooldown_s: 90.0    # 自发开口最小间隔
   vocal_prob: 0.02          # 5s 决策的基础开口概率（克制）
-  diary_memory: false       # 日记是否写入记忆库（默认仅推送监控/日志）
+  diary_memory: false       # 日记写入长期记忆库（重启不丢；true 开启）
+  ws_host: "0.0.0.0"        # 监控推送（web/monitor.html 订阅）
+  ws_port: 8848
+  perception:               # 摄像头 → 离散事件（总开关 vision.enabled）
+    enabled: true
+    fps: 1.0
+    debounce_s: 30.0
+    stranger_cooldown_s: 300
 ```
 
 ## 4. 监控（web/monitor.html）
@@ -83,7 +91,7 @@ pulse:
 - `pulse_runtime_validation.py` —— 接入层 14 天三组（**34/34**）；
 - `weather_life_sync_validation.py` —— 真实天气 → 生命模块同步（**29/29**）；
 - P0–P4 回归全绿：P0（trust 32.6 / startle 2）、P123（15/15×3）、P4（6/6）。
-- 真实语音跑通：`python run.py`（`pulse.backend=legacy` 可回退）。
+- 真实语音跑通：`python run.py`。
 
 ## 6. 真实天气 → 生命模块（weather.life_sync）
 

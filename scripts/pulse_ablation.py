@@ -121,7 +121,7 @@ def disable_organ(loop: LivingLoop, organ: str) -> None:
         loop.river.consolidate_night = lambda diary=None: ""
     elif organ == "seed":
         # 种子不漂移：五维恒基线（仍可读 profile）
-        loop.seed.drift = lambda axis, direction, step=None: None
+        loop._seed_drift = lambda axis, direction, step=None: None
 
 
 # ---------------------------------------------------------------- 仿真
@@ -160,7 +160,7 @@ def simulate(days: int, mode: str, seed: int,
         weather_counts[tk["weather"]["label"]] = \
             weather_counts.get(tk["weather"]["label"], 0) + 1
 
-    profile = loop.seed.profile()
+    profile = loop._seed_profile()
     return {
         "stats": dict(loop.stats),
         "startle_total": len(startle_events),

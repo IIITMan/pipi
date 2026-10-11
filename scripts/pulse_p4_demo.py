@@ -89,11 +89,11 @@ def simulate(days: int, mode: str, seed: int) -> dict:
             diaries.append((day, n))
         loop.tick(60.0, hour)
         if sim_min % 4320 == 0:      # 每 3 天
-            seed_trace.append({"day": day, **loop.seed.profile()})
+            seed_trace.append({"day": day, **loop._seed_profile()})
     return {
         "loop": loop, "diaries": diaries, "seed_trace": seed_trace,
         "stats": dict(loop.stats),
-        "seed_final": loop.seed.profile(),
+        "seed_final": loop._seed_profile(),
         "self_depth": loop.river.self_depth, "nights": loop.river.nights,
         "trust": round(loop.bond.trust, 2),
     }

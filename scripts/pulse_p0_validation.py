@@ -32,7 +32,33 @@ from pipi.pulse.organs.tension import TensionField
 from pipi.pulse.organs.will import Will
 from pipi.pulse.organs.bond import Bond
 from pipi.pulse.organs.river import River
-from pipi.pulse.organs.seed import Seed
+
+# 8→4：Seed 器官已内嵌进 LivingLoop（loop.py 模块常量），此处复刻轻量逻辑
+SEED_AXES = ("boldness", "curiosity", "clinginess", "sensitivity", "reactivity")
+_SEED_BASE, _SEED_CAP, _SEED_CURVE = 5.0, 3.0, (1.0, 0.7, 0.5, 0.3)
+
+
+class _Seed:
+    """仿真用气质轻量实现（与 loop._seed_drift 同语义）。"""
+
+    def __init__(self):
+        self.temperament = {a: _SEED_BASE for a in SEED_AXES}
+        self._depth = 1
+
+    def set_depth(self, depth):
+        self._depth = max(1, int(depth))
+
+    def drift(self, axis, direction, step=None):
+        if axis not in self.temperament:
+            return
+        p = _SEED_CURVE[min(len(_SEED_CURVE) - 1, (self._depth - 1) // 7)]
+        s = (step if step is not None else 0.08) * p
+        v = self.temperament[axis] + direction * s
+        self.temperament[axis] = max(
+            _SEED_BASE - _SEED_CAP, min(_SEED_BASE + _SEED_CAP, v))
+
+    def profile(self):
+        return {k: round(v, 3) for k, v in self.temperament.items()}
 
 # ---------------------------------------------------------------- 场景参数
 SIM_HOURS = 72
@@ -99,7 +125,7 @@ async def main() -> dict:
     will = Will()
     bond = Bond()
     river = River()
-    seed = Seed()
+    seed = _Seed()
     seed.set_depth(1)
     bond.set_days_since_adoption(0.2)     # 领养 0.2 天，认主关键期内
 

@@ -181,7 +181,7 @@ def simulate(days: int, mode: str, seed: int) -> dict:
         "imprinted": rt.loop.bond.imprinted,
         "interact_days": rt.loop.bond.interact_days,
         "self_depth": rt.loop.river.self_depth,
-        "seed_final": rt.loop.seed.profile(),
+        "seed_final": rt.loop._seed_profile(),
     }
 
 

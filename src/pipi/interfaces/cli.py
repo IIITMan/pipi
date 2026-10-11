@@ -194,23 +194,16 @@ class CLI:
             self._reminders.start()
             print("  提醒/闹铃已就绪（说「提醒我X点…」「设闹钟…」即可）\n")
 
-        # 生命模块（PULSE 心搏 / 旧 LifeEngine，可配置回退）
-        #   pulse.backend: "pulse"(默认，LivingLoop) | "legacy"(旧引擎)
+        # 生命模块（PULSE 心搏，8→4 精简后为唯一引擎）
         self._life = None
-        if self.app.cfg.get("life.enabled", True) and self.app.asr is not None:
-            backend = self.app.cfg.get("pulse.backend", "pulse")
-            if backend == "legacy":
-                self._life = self._build_legacy_life()
-            else:
-                self._life = self._build_pulse_life()
+        if self.app.cfg.get("pulse.enabled", True) and self.app.asr is not None:
+            self._life = self._build_pulse_life()
             self._session.life = self._life
             self._life.start()
             if self.verbose:
                 import logging as _logging
                 _logging.getLogger("pipi.pulse").setLevel(_logging.INFO)
-            label = "PULSE 心搏（呼吸/潮汐/预感/羁绊/日记成长）" \
-                if backend != "legacy" else "生命模块"
-            print(f"  {label}已启动（空闲时会自发念叨、微动作）\n")
+            print("  PULSE 心搏已启动（驱力/意愿/羁绊/日记成长，空闲时会自发念叨、微动作）\n")
 
         # WebSocket 推送：静态监控页直接订阅（无 Web 服务依赖）
         await self._setup_monitor_push()
@@ -253,6 +246,8 @@ class CLI:
             motion=getattr(self.app, "motion", None),
             weather=getattr(self.orch, "weather", None),
             env=getattr(self.orch, "env", None),
+            memory=getattr(self.app, "memory", None),
+            user_id=getattr(self, "user_id", None) or "owner",
         )
         rt.bind_cfg(self.app.cfg)
         # 提醒触发 → 记入当天日记（生命流留痕）
@@ -286,43 +281,12 @@ class CLI:
         rt.vocal_renderer = _render_vocal
         return rt
 
-    def _build_legacy_life(self):
-        """旧 LifeEngine（pulse.backend=legacy 时使用）。"""
-        import random as _random
-
-        from pipi.life import LifeEngine
-
-        persona = self.app.persona
-        bot_name = self.app.cfg.get("persona.bot_name", "皮皮")
-        life = LifeEngine(
-            cfg=self.app.cfg,
-            llm=self.app.llm,
-            persona_name=bot_name,
-            persona_hint=f"{bot_name}，{persona.name}人格（{persona.id}），语气傲娇但内心黏人",
-            vision=getattr(self.app, "vision", None),
-            memory_getter=lambda: (
-                (lambda items: _random.choice(items).content if items else None)(
-                    [m for m in self.app.repos.memory.list_live(self._active_uid)
-                     if m.type.value in ("identity", "preference",
-                                         "event", "commitment", "relation")])
-            ),
-            session=self._session,
-        )
-
-        # C4：联想链优先引用 story 记忆（成长故事闪回）
-        def _story_getter():
-            items = self.app.repos.memory.list_story(self.user_id, limit=5)
-            return _random.choice(items) if items else None
-
-        life.story_getter = _story_getter
-        return life
-
     # ------------------------------------------------------------------
     # WebSocket 推送：静态监控页直接订阅，无需启动任何 Web 服务
     # ------------------------------------------------------------------
     async def _setup_monitor_push(self) -> None:
-        ws_port = self.app.cfg.get("life.ws_port", 8848)
-        ws_host = self.app.cfg.get("life.ws_host", "127.0.0.1")
+        ws_port = self.app.cfg.get("pulse.ws_port", 8848)
+        ws_host = self.app.cfg.get("pulse.ws_host", "127.0.0.1")
         try:
             from pipi.interfaces.ws_server import WSHub
 

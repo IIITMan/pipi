@@ -13,10 +13,16 @@ from typing import Any
 from pipi.pulse import derive
 from pipi.pulse.organs.bond import Bond
 from pipi.pulse.organs.river import River
-from pipi.pulse.organs.seed import Seed
 from pipi.pulse.organs.tension import TensionField, TensionSnapshot
 from pipi.pulse.organs.will import Intent, Will
 from pipi.pulse.body import Body
+
+# 气质成长（8→4：原 Seed 器官内嵌为轻量字段，保留五维漂移与塑性；
+# 关系成长由 orchestrator/growth.py 的 S1-S4 阶段机负责，二者分工）
+SEED_AXES = ("boldness", "curiosity", "clinginess", "sensitivity", "reactivity")
+SEED_BASELINE = 5.0            # 0~10
+SEED_CAP_OFFSET = 3.0          # 相对基线最大偏移 ±3
+SEED_PLASTICITY_CURVE = (1.0, 0.7, 0.5, 0.3)   # 按周龄：第1周1.0 → 1月后0.3
 
 MIN = 60.0
 
@@ -30,10 +36,12 @@ class LivingLoop:
         self.will = Will(cfg.get("will"))
         self.bond = Bond(cfg.get("bond"))
         self.river = River(cfg.get("river"))
-        self.seed = Seed(cfg.get("seed"))
-        self.seed.set_depth(1)
-        self.bond.set_days_since_adoption(0.2)     # 领养 0.2 天，认主关键期
         self.body = Body()
+
+        # 气质成长（原 Seed）：五维基线 + 经历漂移（_seed_drift × 塑性）
+        self._temperament = {axis: SEED_BASELINE for axis in SEED_AXES}
+        self._depth = 1
+        self.bond.set_days_since_adoption(0.2)     # 领养 0.2 天，认主关键期
 
         # 简化习惯化（8→4：原 Anticipation 器官只剩两个行为门控）
         self._expected_return = 19.0 * 60 + 30    # 傍晚例行归预期（分钟，EMA 学习）
@@ -99,6 +107,27 @@ class LivingLoop:
                 "label": derive.weather_label(self._mood_base,
                                               self._mood_pulse)}
 
+    # ------------------------------------------------------------- 气质成长（原 Seed 内嵌）
+    def _seed_profile(self) -> dict:
+        """五维气质（监控/内心注入读取）。"""
+        return {k: round(v, 3) for k, v in self._temperament.items()}
+
+    def _set_seed_depth(self, depth: int) -> None:
+        self._depth = max(1, int(depth))
+
+    def _seed_drift(self, axis: str, direction: float,
+                    step: float | None = None) -> None:
+        """经历漂移：气质 += direction × step × 塑性（周龄递减，人格渐稳）。"""
+        if axis not in self._temperament:
+            return
+        p = SEED_PLASTICITY_CURVE[min(
+            len(SEED_PLASTICITY_CURVE) - 1, (self._depth - 1) // 7)]
+        s = (step if step is not None else 0.08) * p
+        new = self._temperament[axis] + direction * s
+        self._temperament[axis] = max(
+            SEED_BASELINE - SEED_CAP_OFFSET,
+            min(SEED_BASELINE + SEED_CAP_OFFSET, new))
+
     # ------------------------------------------------------------- 当天日记
     def _note(self, kind: str, minute: float, text: str = "") -> None:
         """当天日记（不可逆，供入睡成文）。"""
@@ -142,7 +171,7 @@ class LivingLoop:
                 return "又惊又喜，一路小跑迎上去"
             # P3：重聚情绪落差（按分离时长分级：短离/想念/久别）
             rr = self.bond.reunion_response(
-                self.sep_min, clinginess=self.seed.profile()["clinginess"])
+                self.sep_min, clinginess=self._seed_profile()["clinginess"])
             self.push_mood_base(rr["mood"])
             self.tension.push("attachment", rr["attach"])
             self.tension.push("loneliness", -0.6)
@@ -190,7 +219,7 @@ class LivingLoop:
                 self.stats["startle"] += 1
                 self._do_startle()
                 self.will.interrupt()      # P2：惊吓打断当前意图
-                self.seed.drift("sensitivity", +1.0)
+                self._seed_drift("sensitivity", +1.0)
                 self._note("stranger", minute)
                 return "身体一僵！警觉地盯着门口"
             self._note("stranger", minute)
@@ -208,7 +237,7 @@ class LivingLoop:
                 self.stats["startle"] += 1
                 self._do_startle()
                 self.will.interrupt()      # P2：惊吓打断当前意图
-                self.seed.drift("sensitivity", +0.8)
+                self._seed_drift("sensitivity", +0.8)
                 self._note("night_noise", minute)
                 return "从睡梦中惊醒，竖起耳朵"
             self._note("night_noise", minute)
@@ -303,7 +332,7 @@ class LivingLoop:
         if not self.owner_present:
             # P3：思念曲线（先缓后急 × 个体 × 信任）驱动孤独目标
             lon = min(0.75, 0.35 + self.bond.longing(
-                self.sep_min, clinginess=self.seed.profile()["clinginess"]) * 0.5)
+                self.sep_min, clinginess=self._seed_profile()["clinginess"]) * 0.5)
         t = {
             "loneliness": lon,
             "curiosity": 0.15 if self.sim_seconds < self.quiet_until
@@ -372,7 +401,7 @@ class LivingLoop:
             weather["label"], 0) + 1
         if not self.owner_present:
             lg = self.bond.longing(
-                self.sep_min, clinginess=self.seed.profile()["clinginess"])
+                self.sep_min, clinginess=self._seed_profile()["clinginess"])
             self._longing_peak_today = max(self._longing_peak_today, lg)
 
         # 行为尺度：Will 5s 判定（累加器，任意 dt 都按 5s 粒度不漏判）
@@ -428,10 +457,10 @@ class LivingLoop:
                  "events": list(self._diary)}
         drift = self._daily_drift(kinds, diary["longing_peak"])
         for axis, d in drift.items():
-            self.seed.drift(axis, d)
+            self._seed_drift(axis, d)
 
         n = self.river.consolidate_night(diary)
-        self.seed.set_depth(self.river.self_depth)
+        self._set_seed_depth(self.river.self_depth)
         self._miss_return_done = False   # 新的一天，重新期待
         ev = self.bond.advance_days(1.0)
         if ev is not None:

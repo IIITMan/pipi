@@ -156,7 +156,7 @@ def main() -> None:
     block += f"睡眠整理       {loop.river.nights} 次  self_depth={loop.river.self_depth}\n"
     block += f"羁绊 trust     {loop.bond.trust:.1f}\n"
     block += f"呼吸 夜/昼     {sum(night)/len(night):.1f} / {sum(day)/len(day):.1f} bpm\n"
-    block += f"个性           {loop.seed.profile()}\n"
+    block += f"个性           {loop._seed_profile()}\n"
     block += "=" * 64 + "\n"
     block += "（纯本地动力学，零 LLM；P3 接羁绊完整，P4 接生命流与种子。）\n"
     if log_fh:

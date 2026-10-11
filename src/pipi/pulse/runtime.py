@@ -6,10 +6,10 @@
   - 事件注入：会话（人声/打断/应答完成/告别）、视觉感知（到场/离场/陌生人/
     主人低落）、外部模块（提醒触发）统一映射 loop.inject()；
   - 自发发声：按主导意图低频开口（零 LLM 固定句库，冷却+概率克制）；
-  - 每日入睡整理：consolidate_night() 生成日记 + 种子漂移（真实"一天一记"）；
-  - 监控上报：snapshot/事件/聊天经 sink 推给 monitor（与旧 LifeEngine 同协议）。
+  - 每日入睡整理：consolidate_night() 生成日记 + 气质漂移（真实"一天一记"）；
+  - 监控上报：snapshot/事件/聊天经 sink 推给 monitor。
 
-对外接口与 LifeEngine 兼容（session/cli 无需改动即可切换）：
+对外接口（session/cli 调用）：
   start / stop / observe_user_voice / on_barge_in / on_response_done /
   on_farewell / observe_vision / log_chat / set_sink / snapshot / note_event
   / physio.observe_dialogue_mood
@@ -62,7 +62,7 @@ _MOOD_BASE = {
 
 
 class _PhysioCompat:
-    """旧 LifeEngine.physio 的兼容门面（cli 里 observe_dialogue_mood 用）。"""
+    """生理兼容门面（monitor 与 observe_dialogue_mood 读取当前身心数值）。"""
 
     def __init__(self, runtime: "PulseRuntime"):
         self._rt = runtime
@@ -81,12 +81,16 @@ class PulseRuntime:
                  env: Any | None = None,
                  loop: LivingLoop | None = None,
                  clock: Any = None,
-                 mono: Any = None):
+                 mono: Any = None,
+                 memory: Any | None = None,
+                 user_id: str = "owner"):
         p_cfg = (cfg or {}).get("pulse", {}) or {}
         self.cfg = p_cfg
         self.session = session
         self.vision = vision
         self.motion = motion          # 人脸跟随（云台 LOOK_AT）用
+        self.memory = memory          # MemoryManager（diary_memory=true 时日记落库）
+        self.user_id = user_id
         # 真实天气源（WeatherService）：周期拉取 + 订阅对话查询触发 → 心境同步
         self.weather = weather
         self.weather_sync_s = float((cfg or {}).get("weather", {})
@@ -162,11 +166,11 @@ class PulseRuntime:
         # 感知循环（vision 注入且启用时）：事件 → inject
         if self.vision is not None:
             try:
-                from pipi.life.perception import MonotonicClock, PerceptionLoop
+                from pipi.pulse.perception import MonotonicClock, PerceptionLoop
                 perc_cfg = {}
                 full = getattr(self, "_full_cfg", None)
                 if full is not None:
-                    perc_cfg = ((full.get("life", {}) or {})
+                    perc_cfg = ((full.get("pulse", {}) or {})
                                 .get("perception", {}) or {})
                 self._perception = PerceptionLoop(
                     self.vision, MonotonicClock(), perc_cfg,
@@ -246,7 +250,7 @@ class PulseRuntime:
         self._tasks.clear()
 
     # ------------------------------------------------------------------
-    # 会话事件注入（由 InteractionSession 调用，与 LifeEngine 同接口）
+    # 会话事件注入（由 InteractionSession 调用）
     # ------------------------------------------------------------------
 
     def observe_user_voice(self) -> None:
@@ -501,7 +505,7 @@ class PulseRuntime:
         hour = self.clock.now_hour()
         day = self.clock.now_day()
 
-        # 跨天 → 入睡整理（真实"一天一记"：日记 + 种子漂移 + 认主日历）
+        # 跨天 → 入睡整理（真实"一天一记"：日记 + 气质漂移 + 认主日历）
         if day != self._last_day:
             self._last_day = day
             try:
@@ -511,6 +515,13 @@ class PulseRuntime:
                 self._event_log("diary", short)
                 logger.info("PULSE 入睡整理（Day %s）：%s",
                             day, short[:80])
+                # diary_memory=true 且已接记忆库 → 日记写入长期记忆（重启不丢）
+                if self.diary_memory and self.memory is not None and n:
+                    try:
+                        loop = asyncio.get_event_loop()
+                        loop.create_task(self._commit_diary(short, day))
+                    except Exception as exc:
+                        logger.warning("日记落记忆调度失败：%s", exc)
             except Exception as exc:
                 logger.warning("入睡整理异常：%s", exc)
 
@@ -533,6 +544,25 @@ class PulseRuntime:
         if self._since_vocal >= 5.0:
             self._since_vocal = 0.0
             self._maybe_vocal(snap)
+
+    async def _commit_diary(self, short: str, day: int) -> None:
+        """把跨天日记写入长期记忆（异步、失败不影响生命循环）。"""
+        try:
+            from pipi.capabilities.memory_manager import (
+                MemoryCandidate, MemoryType)
+            await self.memory.commit(
+                self.user_id,
+                [MemoryCandidate(
+                    type=MemoryType.EVENT,
+                    content=short,
+                    importance=0.55,      # 日记属日常事件，中低重要
+                    pinned=False,
+                    meta={"kind": "diary", "day": int(day)})],
+                now=self.clock.now(),
+            )
+            logger.info("PULSE 日记已写入长期记忆（Day %s）", day)
+        except Exception as exc:
+            logger.warning("日记落记忆失败（不影响生命循环）：%s", exc)
 
     def _maybe_vocal(self, snap: dict) -> None:
         if snap["sleeping"]:
@@ -640,7 +670,7 @@ class PulseRuntime:
         # monitor 兼容三轴（mood/energy/social 与旧结构同形；平静≈0）
         mood = round((weather - 0.35) * 10.0, 2)
         weather_label = s["weather"]["label"]   # 唯一权威映射（affect._label）
-        prof = self.loop.seed.profile()
+        prof = self.loop._seed_profile()
 
         # 会话状态联动：聆听/应答中显示 chatting/muttering（即使在夜间被唤醒）
         sess_phase = self._session_phase()

@@ -145,7 +145,7 @@ def main() -> None:
     print(f"睡眠整理       {loop.river.nights} 次  self_depth={loop.river.self_depth}")
     print(f"羁绊 trust     {loop.bond.trust:.1f}（认主关键期 ×3 成长中）")
     print(f"呼吸 夜/昼     {sum(night)/len(night):.1f} / {sum(day)/len(day):.1f} bpm")
-    print(f"个性           {loop.seed.profile()}")
+    print(f"个性           {loop._seed_profile()}")
     print("=" * 64)
     print("（这是纯本地动力学，零 LLM；下一步 body 接真硬件表达。）")
 

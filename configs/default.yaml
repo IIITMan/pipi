@@ -157,52 +157,20 @@ audio:
     vad_threshold: 0.5
     min_speech_ms: 200
 
-# ---------------- 生命模块 ----------------
-# backend: pulse（PULSE 心搏，默认）| legacy（旧 LifeEngine，回退用）
+# ---------------- 生命模块（PULSE 心搏，8→4 精简后唯一引擎） ----------------
 pulse:
-  backend: "pulse"
+  enabled: true
   tick_s: 1.0                   # 心搏 1Hz
   vocal_cooldown_s: 90.0        # 自发开口最小间隔
   vocal_prob: 0.02              # 决策开口概率（克制）
-  diary_memory: false
-
-life:
-  enabled: true
-  personality:
-    extraversion: 6.0           # 0~10，越高越爱主动说话
-    curiosity_weight: 6.0
-    sensitivity: 5.0
-    like: ["晚霞", "小故事", "聊天气"]
-    dislike: ["巨大噪音", "连续频繁打断"]
-  rates:
-    physio_hz: 1.0
-    thought_hz: 3.0
-    scheduler_hz: 2.0
-  vocal_cooldown_s: 45.0
-  wandering_cooldown_s: 90.0
-  thought_ttl_s: 5.0
-  social_vocal_threshold: 7.5   # 想找人说话的阈值（越高越稀有）
+  diary_memory: false           # 每日日记写入长期记忆（重启不丢成长；true 开启）
+  ws_host: "0.0.0.0"            # 监控推送（web/monitor.html 订阅）
+  ws_port: 8848
   perception:                   # 摄像头 → 离散事件（总开关 vision.enabled）
     enabled: true
     fps: 1.0
     debounce_s: 30.0            # 同一事件去重窗口
     stranger_cooldown_s: 300
-  energy_min_vocal: 2.5         # 精力低于此不发声
-  sleep_energy: 2.5             # 精力低于此切休息
-  wandering_enter_s: 45.0
-  idle_motion_interval_s: 30.0
-  action_backend: "mock"        # mock | ros2
-  ws_host: "0.0.0.0"            # 监控推送（web/monitor.html 订阅）
-  ws_port: 8848
-  chain:                        # 联想链念头
-    enabled: true
-    chain_prob: 0.01
-    chain_cooldown_s: 90.0
-    require_idle: true
-    min_energy: 3.0
-    vocal_prob: 0.3
-    max_tokens: 60
-    timeout_s: 12.0
 
 # ---------------- 成长系统 ----------------
 growth:

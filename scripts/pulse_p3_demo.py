@@ -84,7 +84,7 @@ def fmt_line(sim_min: int, tk: dict, loop: LivingLoop) -> str:
     long_s = ""
     if not loop.owner_present:
         lg = loop.bond.longing(loop.sep_min,
-                               clinginess=loop.seed.profile()["clinginess"])
+                               clinginess=loop._seed_profile()["clinginess"])
         long_s = f" 思念{lg * 100:3.0f}%"
     return (f"{hm} {b}  {wv}{long_s} | 挣扎{s.struggle:.2f} | 天气{tk['weather'].label} | "
             f"呼吸{tk['breath'].rate_bpm:5.1f} 灯{body['lamp']:.2f} "
@@ -139,7 +139,7 @@ def run_simulation(args) -> None:
             tk["weather"].label, 0) + 1
         if not loop.owner_present:
             max_longing = max(max_longing, loop.bond.longing(
-                loop.sep_min, clinginess=loop.seed.profile()["clinginess"]))
+                loop.sep_min, clinginess=loop._seed_profile()["clinginess"]))
         step = 60 if sleeping else args.step_min
         if sim_min % step == 0:
             say(fmt_line(sim_min, tk, loop))
@@ -162,7 +162,7 @@ def run_simulation(args) -> None:
     block += f"认主进度       剩余 {days_left:.1f} 天 / 已互动 {interact_days:.0f} 天"
     block += f"（≥{loop.bond.cfg['imprint_min_interact_days']:.0f} 天认主成功）\n"
     block += f"呼吸 夜/昼     {sum(night) / len(night):.1f} / {sum(day_r) / len(day_r):.1f} bpm\n"
-    block += f"个性           {loop.seed.profile()}\n"
+    block += f"个性           {loop._seed_profile()}\n"
     block += "=" * 64 + "\n"
     block += "（纯本地动力学，零 LLM；P4 接生命流与种子漂移成文。）\n"
     if log_fh:

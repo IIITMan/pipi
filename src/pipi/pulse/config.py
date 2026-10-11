@@ -55,11 +55,3 @@ BOND = {
     "neglect_trust_loss": 0.5,     # 冷淡重聚（无视）信任损失
     "neglect_mood": -0.25,         # 冷淡重聚情绪失落
 }
-
-# ---- Seed 种子（§4.8 / P4：塑性按"周龄"分段，成长可见但不失控）----
-SEED = {
-    "axes": ("boldness", "curiosity", "clinginess", "sensitivity", "reactivity"),
-    "baseline": 5.0,               # 0~10
-    "cap_offset": 3.0,             # 相对基线最大偏移 ±3
-    "plasticity_curve": (1.0, 0.7, 0.5, 0.3),  # 按周龄档：第1周1.0 → 第2周0.7 → 第3周0.5 → 1月后0.3
-}

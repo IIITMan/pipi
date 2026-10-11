@@ -213,23 +213,18 @@ class River:
     def self_depth(self) -> int: ...
 ```
 
-### 4.8 Seed 种子（生命）—— 气质 × 经历 → 不可重置的独特个性
+### 4.8 气质成长（8→4：原 Seed 器官内嵌为 loop 轻量字段）
 
 **目的**：每只皮皮不同（IP 内核）。个性由先天气质 + 可塑性约束，LLM 不决定"我是谁"。
 
 | 状态 | 类型 | 默认值 |
 |---|---|---|
-| temperament | dict[5 维 ∈0..1] | 出生时生成（胆大/急躁/黏人/好奇/敏感） |
-| plasticity | float 随 self_depth 递减 | 曲线 [1.0, 0.6, 0.35, 0.15]（同 growth） |
+| `loop._temperament` | dict[5 维 ∈0..10] | 全部 5.0（胆大/好奇/黏人/敏感/反应） |
+| `loop._depth` | int（self_depth 周龄） | 1；塑性曲线 (1.0, 0.7, 0.5, 0.3) |
 
-**动力学**：经历事件（受惊吓/被温柔对待/被冷落）→ 相关特质 `+= step × plasticity × direction`；cap_offset ±3 档防漂移失控。**出生一次，不可重置**。
+**动力学**：经历事件（受惊吓/被温柔对待/被冷落）→ `loop._seed_drift(axis, ±)`：特质 `+= step × plasticity × direction`；cap ±3 防漂移失控。**出生一次，不可重置**。关系成长（S1-S4 阶段机/里程碑）由 orchestrator/growth.py 负责，气质成长归 loop 内嵌字段，二者分工不重叠。
 
-**接口**
-```python
-class Seed:
-    def drift(self, event) -> None: ...
-    def profile(self) -> dict: ...
-```
+**接口**（loop 上）：`_seed_profile()` / `_seed_drift(axis, direction, step=None)` / `_set_seed_depth(depth)`。
 
 ---
 
@@ -272,16 +267,16 @@ src/pipi/pulse/
 ├── clock.py             # 三尺度 tick 调度
 ├── organs/
 │   ├── rhythm.py        # Rhythm 4.1
-│   ├── anticipation.py  # Anticipation 4.2
-│   ├── tension.py       # Tension 4.3
-│   ├── affect.py        # Affect 4.4
-│   ├── will.py          # Will 4.5
-│   ├── bond.py          # Bond 4.6
-│   ├── river.py         # River 4.7
-│   └── seed.py          # Seed 4.8
+│   ├── tension.py       # Tension 4.3（驱力场，核心）
+│   ├── will.py          # Will 4.5（行为仲裁，核心）
+│   ├── bond.py          # Bond 4.6（关系，核心）
+│   └── river.py         # River 4.7（跨天整理器，瘦身版）
 ├── body.py              # 身体表达映射（呼吸灯/表情/动作/声音质地）
+├── derive.py            # 派生展示层（Affect 天气 / Rhythm 呼吸，8→4 由器官降级）
 └── config.py            # 全部数值参数（即 §4 各表默认值）
 ```
+
+> **8→4 精简（2026-10-11，消融证据 `scripts/pulse_ablation.py`）**：删除器官 Affect/Rhythm（纯展示，消融零影响）→ 派生层 derive.py；删除 Anticipation（只损惊吓门控）→ loop 习惯化字段；River 删 5000 条缓冲（仅叙事模板）；Seed 内嵌 loop 气质字段；Tension/Will/Bond 为核心保留。旧 LifeEngine（`pipi.life` 包）整体删除。
 
 **LivingLoop 接口**
 ```python

@@ -156,7 +156,7 @@ def simulate(days: int, mode: str, seed: int) -> dict:
                 "sep_min": round(loop.sep_min, 0),
                 "longing": round(loop.bond.longing(
                     loop.sep_min,
-                    clinginess=loop.seed.profile()["clinginess"]), 3),
+                    clinginess=loop._seed_profile()["clinginess"]), 3),
                 "waves": {k: round(v, 3) for k, v in tk["tension"].waves.items()},
             })
 

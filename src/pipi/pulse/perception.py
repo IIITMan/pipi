@@ -1,4 +1,5 @@
-"""感知循环 —— 摄像头帧 → 离散事件 → LifeEngine（PERCEPTION_PLAN §2）。
+"""感知循环 —— 摄像头帧 → 离散事件 → PULSE（原 pipi.life.perception，
+8→4 精简时随 legacy 删除迁入 pulse 包，是 PULSE 视觉接入的唯一消费者）。
 
 设计要点（见 PERCEPTION_PLAN §8 评审修订）：
   - 本循环是 VisionPipeline.capture() 的**唯一消费者**；
