@@ -84,18 +84,12 @@ def gen_events(days: int, mode: str, seed: int) -> list[tuple[int, int, str, dic
 
 # ---------------------------------------------------------------- 器官禁用
 def disable_organ(loop: LivingLoop, organ: str) -> None:
-    """把指定器官 patch 为恒值/空操作（不动产品代码）。"""
-    if organ == "rhythm":
-        # 呼吸恒定：无 arousal 变化、无惊吓脉冲
-        def _tick(dt, arousal_target, sleeping=False):
-            from pipi.pulse.organs.rhythm import BreathSample
-            loop.rhythm.phase = (loop.rhythm.phase + dt * 12.0 / 60.0) % 1.0
-            return BreathSample(phase=loop.rhythm.phase, depth=0.4,
-                                rate_bpm=12.0, heartbeat_bpm=48)
-        loop.rhythm.tick = _tick
-        loop.rhythm.burst = lambda amp: None
-        loop.rhythm.trigger_arousal = lambda pulse: None
-    elif organ == "anticipation":
+    """把指定器官 patch 为恒值/空操作（不动产品代码）。
+
+    8→4 精简后 Rhythm/Affect 已无独立对象（降为派生），不再参与消融；
+    其余器官与 full 对比。
+    """
+    if organ == "anticipation":
         # 预感恒 calm：无惊吓/好奇判定（事件仍注入，但不再产生 surprise）
         def _update(key, observed):
             from pipi.pulse.organs.anticipation import Surprise
@@ -113,14 +107,6 @@ def disable_organ(loop: LivingLoop, organ: str) -> None:
                 dominant="loneliness", struggle=1.0, waves=dict(loop.tension.values))
         loop.tension.update = _update
         loop.tension.push = lambda wave, magnitude: None
-    elif organ == "affect":
-        # 心境恒定平静（多云基线）：无底色波澜
-        def _update(dt):
-            from pipi.pulse.organs.affect import Weather
-            return Weather(base=loop.affect.baseline, pulse=0.0, label="多云")
-        loop.affect.update = _update
-        loop.affect.push_base = lambda v: None
-        loop.affect.push_pulse = lambda v: None
     elif organ == "will":
         # 意愿不决策：意图恒 None（无切换、无用的事、打断挂起）
         loop.will.decide = lambda snap: None
@@ -176,11 +162,11 @@ def simulate(days: int, mode: str, seed: int,
                 diary_len_total += len(n)
                 diary_days += 1
         tk = loop.tick(60.0, hour)
-        r = tk["breath"].rate_bpm
+        r = tk["breath"]["rate_bpm"]
         rate_extremes[0] = min(rate_extremes[0], r)
         rate_extremes[1] = max(rate_extremes[1], r)
-        weather_counts[tk["weather"].label] = \
-            weather_counts.get(tk["weather"].label, 0) + 1
+        weather_counts[tk["weather"]["label"]] = \
+            weather_counts.get(tk["weather"]["label"], 0) + 1
 
     profile = loop.seed.profile()
     return {
@@ -233,7 +219,7 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=20261008)
     args = ap.parse_args()
 
-    organs = ["full", "rhythm", "anticipation", "tension", "affect",
+    organs = ["full", "anticipation", "tension",
               "will", "bond", "river", "seed"]
     modes = ("random", "intimate", "busy")
 

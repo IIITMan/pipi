@@ -27,10 +27,9 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from pipi.pulse.organs.rhythm import Rhythm
+from pipi.pulse import derive
 from pipi.pulse.organs.anticipation import Anticipation
 from pipi.pulse.organs.tension import TensionField
-from pipi.pulse.organs.affect import Affect
 from pipi.pulse.organs.will import Will
 from pipi.pulse.organs.bond import Bond
 from pipi.pulse.organs.river import River
@@ -97,16 +96,20 @@ def evening_targets(owner_present: bool, bond: Bond) -> dict:
 
 # ---------------------------------------------------------------- 主循环
 async def main() -> dict:
-    rhythm = Rhythm()
     anticipation = Anticipation()
     tension = TensionField()
-    affect = Affect()
     will = Will()
     bond = Bond()
     river = River()
     seed = Seed()
     seed.set_depth(1)
     bond.set_days_since_adoption(0.2)     # 领养 0.2 天，认主关键期内
+
+    # 派生展示状态（8→4：原 Rhythm/Affect 器官的数值，见 pulse/derive.py）
+    rate, depth, phase = derive.BASE_RATE_BPM, 0.4, 0.0
+    burst = 0.0
+    mood_base = derive.MOOD_BASELINE
+    mood_pulse = 0.0
 
     # 仿真状态
     owner_present = True
@@ -168,12 +171,12 @@ async def main() -> dict:
                 anticipation.learn("owner_evening_return", minute % 1440)
                 # 重聚：精神一振（孤独即时消解 + 底色回暖）
                 boost = bond.on_reunion()
-                affect.push_base(boost["mood"])
+                mood_base = derive.clamp(mood_base + boost["mood"], -1.0, 1.0)
                 tension.push("loneliness", -0.6)
             elif kind == "chat":
                 chatting_until = t + dur * MIN
                 tension.push("loneliness", -0.45)
-                affect.push_base(0.20)
+                mood_base = derive.clamp(mood_base + 0.20, -1.0, 1.0)
                 bond.interact()
                 river.record({"kind": "chat", "t_min": round(minute, 1)})
             elif kind == "quiet_home":
@@ -184,8 +187,8 @@ async def main() -> dict:
                 anticipation.learn("stranger", 1.0)
                 if sur.kind == "startle":
                     startle_count += 1
-                    rhythm.trigger_arousal(0.9)
-                    affect.push_pulse(0.60)
+                    burst = 0.9
+                    mood_pulse = derive.clamp(mood_pulse + 0.60, 0.0, 1.0)
                     tension.push("security", -0.45)
                     seed.drift("sensitivity", +1.0)
                     river.record({"kind": "startle", "t_min": round(minute, 1)})
@@ -196,7 +199,7 @@ async def main() -> dict:
             elif kind == "owner_sad":
                 sur = anticipation.update("owner_expression", 1.0)
                 anticipation.learn("owner_expression", 1.0)
-                affect.push_base(-0.30)
+                mood_base = derive.clamp(mood_base - 0.30, -1.0, 1.0)
                 tension.push("attachment", +0.25)
                 bond.interact()                    # 关心也是共同经历
                 river.record({"kind": "concern", "t_min": round(minute, 1)})
@@ -205,8 +208,8 @@ async def main() -> dict:
                 anticipation.learn("night_noise", 1.0)
                 if sur.kind == "startle":
                     startle_count += 1
-                    rhythm.trigger_arousal(0.9)
-                    affect.push_pulse(0.60)
+                    burst = 0.9
+                    mood_pulse = derive.clamp(mood_pulse + 0.60, 0.0, 1.0)
                     tension.push("security", -0.4)
                     seed.drift("sensitivity", +0.8)
                     river.record({"kind": "startle", "t_min": round(minute, 1)})
@@ -225,11 +228,17 @@ async def main() -> dict:
             sleep_narratives.append(narrative)
             seed.set_depth(river.self_depth)
 
-        # ---- 器官更新（快循环）----
+        # ---- 器官更新（快循环：Tension + 派生呼吸/心境）----
         arousal = tension.total * (0.4 if sleeping else 1.0)
-        breath = rhythm.tick(DT, arousal, sleeping=sleeping)
+        burst = derive.burst_decay(burst, DT)
+        breath = derive.breath_step(rate, depth, phase, arousal, burst,
+                                    DT, sleeping=sleeping)
+        rate, depth, phase = (breath["rate_bpm"], breath["depth"],
+                              breath["phase"])
         snap = tension.update(DT, targets, sleeping=sleeping)
-        weather = affect.update(DT)
+        mood_base, mood_pulse = derive.decay_mood(mood_base, mood_pulse, DT)
+        weather = {"base": mood_base, "pulse": mood_pulse,
+                   "label": derive.weather_label(mood_base, mood_pulse)}
 
         # 行为尺度：Will 5s
         if t - last_will >= WILL_TICK:
@@ -255,17 +264,17 @@ async def main() -> dict:
                 "hour": round(h, 2),
                 "sleeping": int(sleeping),
                 "owner": int(owner_present),
-                "rate_bpm": breath.rate_bpm,
-                "depth": round(breath.depth, 3),
+                "rate_bpm": breath["rate_bpm"],
+                "depth": round(breath["depth"], 3),
                 "loneliness": snap.waves["loneliness"],
                 "curiosity": snap.waves["curiosity"],
                 "sleepiness": snap.waves["sleepiness"],
                 "security": snap.waves["security"],
                 "attachment": snap.waves["attachment"],
                 "struggle": snap.struggle,
-                "base": weather.base,
-                "pulse": weather.pulse,
-                "weather": weather.label,
+                "base": weather["base"],
+                "pulse": weather["pulse"],
+                "weather": weather["label"],
                 "trust": round(bond.trust, 2),
                 "self_depth": river.self_depth,
             })

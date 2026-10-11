@@ -1,11 +1,10 @@
 """真实天气 → PULSE 生命模块 同步验证。
 
 覆盖：
-  1. WeatherService._WMO_KIND 类别映射（抽查）
-  2. WeatherService.subscribe / _notify（类别变化才广播）
-  3. loop.observe_weather 数值调制（克制幅度 / 雷雨波澜 / 阴雨思念 / 日记留痕）
-  4. runtime._sync_weather（类别变化才触发、外部天气进快照与内心注入）
-  5. 订阅回调（对话查询触发 → 同步）
+  1. WeatherService.subscribe / _notify（类别变化才广播）
+  2. loop.observe_weather 数值调制（克制幅度 / 雷雨波澜 / 阴雨思念 / 日记留痕）
+  3. runtime._sync_weather（类别变化才触发、外部天气进快照与内心注入）
+  4. 订阅回调（对话查询触发 → 同步）
 """
 import math
 import sys
@@ -13,7 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from pipi.capabilities.weather import KIND_ZH, WeatherService, _WMO_KIND
+from pipi.capabilities.weather import KIND_ZH, WeatherService
 from pipi.pulse.loop import LivingLoop
 from pipi.pulse.runtime import PulseRuntime
 
@@ -52,16 +51,8 @@ class FakeWeather:
             fn(kind)
 
 
-print("== 1. WMO 类别映射 ==")
-check("晴", _WMO_KIND[0] == "sunny")
-check("多云", _WMO_KIND[2] == "cloudy")
-check("阴", _WMO_KIND[3] == "overcast")
-check("雨(61)", _WMO_KIND[61] == "rain")
-check("阵雨(80)", _WMO_KIND[80] == "rain")
-check("雪(71)", _WMO_KIND[71] == "snow")
-check("雷(95)", _WMO_KIND[95] == "thunder")
-check("雾(45)", _WMO_KIND[45] == "fog")
-check("KIND_ZH 中文", KIND_ZH["rain"] == "雨")
+print("== 1. 类别中文映射 ==")
+check("KIND_ZH 中文", KIND_ZH["rain"] == "雨" and KIND_ZH["thunder"] == "雷雨")
 
 print("== 2. WeatherService 订阅广播 ==")
 svc = WeatherService(city="测试市")
@@ -73,14 +64,14 @@ svc._notify("sunny")
 check("类别变化才广播", got == ["rain", "sunny"], f"got={got}")
 check("kind() 初始 None", svc.kind() is None)
 
-print("== 3. loop.observe_weather 调制 ==")
+print("== 2. loop.observe_weather 调制 ==")
 loop = LivingLoop()
-base0 = loop.affect.base
+base0 = loop._mood_base
 n0 = len(loop._diary)
 lon0 = loop.tension.values.get("loneliness", 0.0)
 text = loop.observe_weather("rain")
-check("雨 → 底色 -0.04", math.isclose(loop.affect.base, base0 - 0.04, abs_tol=1e-9),
-      f"{base0:.2f}→{loop.affect.base:.2f}")
+check("雨 → 底色 -0.04", math.isclose(loop._mood_base, base0 - 0.04, abs_tol=1e-9),
+      f"{base0:.2f}→{loop._mood_base:.2f}")
 check("雨 → 思念微涨 +0.06",
       math.isclose(loop.tension.values.get("loneliness", 0.0), lon0 + 0.06, abs_tol=1e-9),
       f"{lon0:.2f}→{loop.tension.values.get('loneliness', 0.0):.2f}")
@@ -88,24 +79,24 @@ check("雨 → 日记留痕", len(loop._diary) == n0 + 1)
 check("雨 → 有描述", bool(text) and "下雨" in text)
 
 loop2 = LivingLoop()
-b0 = loop2.affect.base
-p0 = loop2.affect.pulse
+b0 = loop2._mood_base
+p0 = loop2._mood_pulse
 s0 = loop2.tension.values.get("security", 0.0)
 loop2.observe_weather("thunder")
-check("雷雨 → 底色 -0.05", math.isclose(loop2.affect.base, b0 - 0.05, abs_tol=1e-9))
-check("雷雨 → 波澜 +0.12", math.isclose(loop2.affect.pulse, p0 + 0.12, abs_tol=1e-9))
+check("雷雨 → 底色 -0.05", math.isclose(loop2._mood_base, b0 - 0.05, abs_tol=1e-9))
+check("雷雨 → 波澜 +0.12", math.isclose(loop2._mood_pulse, p0 + 0.12, abs_tol=1e-9))
 check("雷雨 → 安全感 -0.15", math.isclose(loop2.tension.values.get("security", 0.0), s0 - 0.15, abs_tol=1e-9))
 
 loop3 = LivingLoop()
-b0 = loop3.affect.base
+b0 = loop3._mood_base
 loop3.observe_weather("sunny")
-check("晴 → 底色 +0.02", math.isclose(loop3.affect.base, b0 + 0.02, abs_tol=1e-9))
+check("晴 → 底色 +0.02", math.isclose(loop3._mood_base, b0 + 0.02, abs_tol=1e-9))
 check("未知类别不生效", loop3.observe_weather("hail") == "" and
-      math.isclose(loop3.affect.base, b0 + 0.02, abs_tol=1e-9))
-check("幅度克制(≤0.05)", abs(loop.affect.base - 0.35) <= 0.05 and
-      abs(loop2.affect.base - 0.35) <= 0.05 and abs(loop3.affect.base - 0.35) <= 0.05)
+      math.isclose(loop3._mood_base, b0 + 0.02, abs_tol=1e-9))
+check("幅度克制(≤0.05)", abs(loop._mood_base - 0.35) <= 0.05 and
+      abs(loop2._mood_base - 0.35) <= 0.05 and abs(loop3._mood_base - 0.35) <= 0.05)
 
-print("== 4. runtime 同步（类别变化才触发） ==")
+print("== 3. runtime 同步（类别变化才触发） ==")
 fw = FakeWeather()
 rt = PulseRuntime({"pulse": {}, "weather": {"sync_interval_s": 1800}},
                   weather=fw)
@@ -125,7 +116,7 @@ fw.set("sunny")
 rt._sync_weather()
 check("晴 → 快照更新", rt.snapshot()["pulse"]["weather_ext"] == "晴")
 
-print("== 5. 订阅回调（对话查询触发） ==")
+print("== 4. 订阅回调（对话查询触发） ==")
 rt2 = PulseRuntime({"pulse": {}, "weather": {}}, weather=fw)
 fw.subscribe(rt2._on_weather_change)    # runtime.start() 里做的同一件事
 fw.set("overcast")

@@ -103,7 +103,23 @@ class FakeEv:
 
 rt = PulseRuntime({"pulse": {}, "alerts": {"stranger_min": 2},
                    "weather": {}}, session=FakeSession())
+
+
+class DayClock:
+    """确定性白天时钟：回家汇报/陌生人预警不被睡眠抑制（与运行时刻解耦）。"""
+
+    def now_hour(self):
+        return 15.0
+
+    def now_minute(self):
+        return 30
+
+    def now_day(self):
+        return 1
+
+
 # 提醒留痕 → 回家汇报
+rt.clock = DayClock()
 rt.note_event("reminder", "吃药")
 rt.observe_vision(FakeEv("owner_arrived", "主人回来了"))
 check("回家汇报进统一说话", any("吃药" in s or "提醒" in s for s in rt.session.spoken),
@@ -112,6 +128,7 @@ check("汇报事件留痕", any(e["kind"] == "report_home" for e in rt._outbox))
 
 rt2 = PulseRuntime({"pulse": {}, "alerts": {"stranger_min": 2},
                     "weather": {}}, session=FakeSession())
+rt2.clock = DayClock()
 rt2.observe_vision(FakeEv("stranger", "有陌生人出现"))
 rt2.observe_vision(FakeEv("stranger", "有陌生人出现"))
 check("陌生人×2 → 预警开口", any("不放心" in s or "留意" in s
@@ -119,6 +136,7 @@ check("陌生人×2 → 预警开口", any("不放心" in s or "留意" in s
 
 rt3 = PulseRuntime({"pulse": {}, "alerts": {"stranger_min": 2},
                     "weather": {}}, session=FakeSession())
+rt3.clock = DayClock()
 rt3.note_event("reminder", "吃药")
 rt3.session.is_busy = True
 rt3.observe_vision(FakeEv("owner_arrived", "主人回来了"))

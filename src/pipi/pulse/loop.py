@@ -1,6 +1,6 @@
 """LivingLoop —— PULSE 主循环编排（PULSE_DESIGN §7）。
 
-P1 范围：快循环（Rhythm+Tension）→ 行为尺度（Will 5s）→ 身体表达（Body）。
+P1 范围：快循环（Tension+派生呼吸）→ 行为尺度（Will 5s）→ 身体表达（Body）。
 内部自持主体状态（owner 在场/分离时长/警觉/对话），外部只注入事件与昼夜时间
 ——这就是"生命有独立生活"（旧方案 6 条无法优化点之一）的起点。
 """
@@ -10,11 +10,9 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from pipi.pulse.config import RHYTHM
-from pipi.pulse.organs.affect import Affect
+from pipi.pulse import derive
 from pipi.pulse.organs.anticipation import Anticipation
 from pipi.pulse.organs.bond import Bond
-from pipi.pulse.organs.rhythm import BreathSample, Rhythm
 from pipi.pulse.organs.river import River
 from pipi.pulse.organs.seed import Seed
 from pipi.pulse.organs.tension import TensionField, TensionSnapshot
@@ -29,10 +27,8 @@ class LivingLoop:
 
     def __init__(self, cfg: dict | None = None):
         cfg = cfg or {}
-        self.rhythm = Rhythm(cfg.get("rhythm"))
         self.anticipation = Anticipation(cfg.get("anticipation"))
         self.tension = TensionField(cfg.get("tension"))
-        self.affect = Affect(cfg.get("affect"))
         self.will = Will(cfg.get("will"))
         self.bond = Bond(cfg.get("bond"))
         self.river = River(cfg.get("river"))
@@ -40,6 +36,15 @@ class LivingLoop:
         self.seed.set_depth(1)
         self.bond.set_days_since_adoption(0.2)     # 领养 0.2 天，认主关键期
         self.body = Body()
+
+        # 派生展示状态（8→4：原 Affect/Rhythm 器官降为派生值，见 derive.py）
+        self._mood_base = derive.MOOD_BASELINE   # 心境底色（事件 push，τ=1h 回归）
+        self._mood_pulse = 0.0                   # 情绪波澜（事件 push，τ=60s 衰减）
+        self._burst = 0.0                        # 惊吓/惊喜呼吸脉冲（指数衰减）
+        self._arousal = 0.0                      # 唤醒度（呼吸驱动，τ=4s 滞后）
+        self._breath_rate = derive.BASE_RATE_BPM
+        self._breath_depth = 0.4
+        self._breath_phase = 0.0
 
         # 主体状态（内部自持）
         self.owner_present = True
@@ -70,6 +75,26 @@ class LivingLoop:
         self._diary: list[dict] = []
         self._weather_today: dict[str, int] = {}
         self._longing_peak_today = 0.0
+
+    # ------------------------------------------------------------- 派生心境/呼吸
+    def push_mood_base(self, v: float) -> None:
+        """心境底色事件（对话开心/低落、重聚振奋）。"""
+        self._mood_base = derive.clamp(self._mood_base + v, -1.0, 1.0)
+
+    def push_mood_pulse(self, v: float) -> None:
+        """情绪波澜事件（惊吓/惊喜/受挫）。"""
+        self._mood_pulse = derive.clamp(self._mood_pulse + v, 0.0, 1.0)
+
+    def trigger_burst(self, amp: float) -> None:
+        """惊吓/惊喜呼吸脉冲（指数衰减，取最大冲击）。"""
+        self._burst = max(self._burst, derive.clamp(amp, 0.0, 1.0))
+
+    def _derive_weather(self) -> dict:
+        """心境 → 天气（唯一权威映射，与原 affect 语义一致）。"""
+        return {"base": round(self._mood_base, 3),
+                "pulse": round(self._mood_pulse, 3),
+                "label": derive.weather_label(self._mood_base,
+                                              self._mood_pulse)}
 
     # ------------------------------------------------------------- 当天日记
     def _note(self, kind: str, minute: float, text: str = "") -> None:
@@ -104,8 +129,8 @@ class LivingLoop:
                 self.anticipation.learn("owner_evening_return", minute)
                 early = (exp - minute) if exp is not None else 0.0
             if early > 30.0:
-                self.rhythm.burst(0.5)
-                self.affect.push_base(0.25)
+                self.trigger_burst(0.5)
+                self.push_mood_base(0.25)
                 self.tension.push("attachment", 0.20)
                 self.stats["early_reunion"] += 1
                 self._note("early_reunion", minute)
@@ -116,7 +141,7 @@ class LivingLoop:
             # P3：重聚情绪落差（按分离时长分级：短离/想念/久别）
             rr = self.bond.reunion_response(
                 self.sep_min, clinginess=self.seed.profile()["clinginess"])
-            self.affect.push_base(rr["mood"])
+            self.push_mood_base(rr["mood"])
             self.tension.push("attachment", rr["attach"])
             self.tension.push("loneliness", -0.6)
             if rr["trust_gain"] > 0:
@@ -134,7 +159,7 @@ class LivingLoop:
             self.owner_present = True
             self._miss_return_done = True
             ng = self.bond.neglected()
-            self.affect.push_base(ng["mood"])
+            self.push_mood_base(ng["mood"])
             self.tension.push("attachment", ng["attach"])
             self.stats["neglected"] += 1
             self._note("owner_ignored", minute)
@@ -142,7 +167,7 @@ class LivingLoop:
         if kind == "user_voice":
             self.chatting_until = self.sim_seconds + kw.get("dur", 5.0) * MIN
             self.tension.push("loneliness", -0.45)
-            self.affect.push_base(0.20)
+            self.push_mood_base(0.20)
             self.bond.interact()
             # 夜间被唤醒聊天：对话结束后再保持（dur+10）分钟清醒，然后睡回去
             self.wake(kw.get("dur", 5.0) + 10.0)
@@ -174,7 +199,7 @@ class LivingLoop:
         if kind == "owner_sad":
             self.anticipation.update("owner_expression", 1.0)
             self.anticipation.learn("owner_expression", 1.0)
-            self.affect.push_base(-0.30)
+            self.push_mood_base(-0.30)
             self.tension.push("attachment", +0.25)
             self.bond.interact()
             self._note("owner_sad", minute)
@@ -222,9 +247,9 @@ class LivingLoop:
         d = self._WEATHER_BASE.get(kind)
         if d is None:
             return ""
-        self.affect.push_base(d)
+        self.push_mood_base(d)
         if kind == "thunder":
-            self.affect.push_pulse(0.12)
+            self.push_mood_pulse(0.12)
             self.tension.push("security", -0.15)
         if kind in ("rain", "fog", "overcast"):
             self.tension.push("loneliness", 0.06)
@@ -235,8 +260,8 @@ class LivingLoop:
     def _do_startle(self) -> None:
         self._startle = True
         self._startle_t = self.sim_seconds
-        self.rhythm.trigger_arousal(0.9)
-        self.affect.push_pulse(0.60)
+        self.trigger_burst(0.9)
+        self.push_mood_pulse(0.60)
         self.tension.push("security", -0.45)
         self.wake(20.0)      # 吓醒后 20 分钟内不再入睡（白天无害，本就清醒）
 
@@ -313,7 +338,7 @@ class LivingLoop:
             missed = True
             self.tension.push("loneliness", 0.22)
             self.tension.push("security", -0.15)
-            self.affect.push_base(-0.12)
+            self.push_mood_base(-0.12)
             self.stats["missed_return"] += 1
 
         # 睡眠状态：困意曲线 + 滞回（入睡需 sl>0.62，醒需 sl<0.50）
@@ -334,12 +359,21 @@ class LivingLoop:
             self._startle = False
 
         arousal = self.tension.total * (0.4 if self.sleeping else 1.0)
-        breath = self.rhythm.tick(dt, arousal, sleeping=self.sleeping)
+        self._arousal = arousal
+        self._burst = derive.burst_decay(self._burst, dt)
+        breath = derive.breath_step(
+            self._breath_rate, self._breath_depth, self._breath_phase,
+            arousal, self._burst, dt, sleeping=self.sleeping)
+        self._breath_rate = breath["rate_bpm"]
+        self._breath_depth = breath["depth"]
+        self._breath_phase = breath["phase"]
         snap = self.tension.update(dt, targets, sleeping=self.sleeping)
-        weather = self.affect.update(dt)
+        self._mood_base, self._mood_pulse = derive.decay_mood(
+            self._mood_base, self._mood_pulse, dt)
+        weather = self._derive_weather()
         # P4：当天天气/思念素材（入睡成文用）
-        self._weather_today[weather.label] = self._weather_today.get(
-            weather.label, 0) + 1
+        self._weather_today[weather["label"]] = self._weather_today.get(
+            weather["label"], 0) + 1
         if not self.owner_present:
             lg = self.bond.longing(
                 self.sep_min, clinginess=self.seed.profile()["clinginess"])
@@ -405,7 +439,7 @@ class LivingLoop:
         self._miss_return_done = False   # 新的一天，重新期待
         ev = self.bond.advance_days(1.0)
         if ev is not None:
-            self.affect.push_base(ev["mood"])
+            self.push_mood_base(ev["mood"])
             self.tension.push("attachment", ev["attach"])
             n = n + "\n「" + ev["text"] + "」"
 
@@ -459,13 +493,13 @@ class LivingLoop:
 
     def snapshot(self) -> dict:
         snap = self.tension.snapshot(sleeping=self.sleeping)
+        weather = self._derive_weather()
         return {
             "t": round(self.sim_seconds / MIN, 1),
-            "breath": {"rate": self.rhythm.rate_bpm, "depth": self.rhythm.depth},
+            "breath": {"rate": self._breath_rate, "depth": self._breath_depth},
             "tension": snap.waves,
             "struggle": snap.struggle,
-            "weather": {"base": self.affect.base, "pulse": self.affect.pulse,
-                        "label": self.affect._label()},
+            "weather": weather,
             "trust": round(self.bond.trust, 2),
             "self_depth": self.river.self_depth,
             "owner_present": self.owner_present,

@@ -22,11 +22,11 @@ class Body:
 
     # ------------------------------------------------------------------
 
-    def express(self, breath: Any, snap: Any, weather: Any,
+    def express(self, breath: dict, snap: Any, weather: dict,
                 intent: Any | None, startle: bool = False) -> dict:
-        """一帧身体表达。breath/snap/weather/intent 来自 LivingLoop.tick。"""
+        """一帧身体表达。breath/weather 为派生 dict，snap/intent 来自 tick。"""
         # 呼吸灯亮度：随呼吸深浅（depth）与相位起伏
-        lamp = round(0.35 + 0.65 * breath.depth, 2)
+        lamp = round(0.35 + 0.65 * breath["depth"], 2)
 
         # 眼睛：惊吓睁大 > 犯困半闭 > 正常
         if startle:
@@ -37,9 +37,9 @@ class Body:
             self.eye = "正常"
 
         # 姿态：底色沉重→蜷缩；波澜紧绷；否则松弛
-        if weather.base < -0.3:
+        if weather["base"] < -0.3:
             self.pose = "蜷缩"
-        elif weather.pulse > 0.5:
+        elif weather["pulse"] > 0.5:
             self.pose = "紧绷"
         else:
             self.pose = "松弛"

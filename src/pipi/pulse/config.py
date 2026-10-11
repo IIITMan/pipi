@@ -5,23 +5,6 @@ P0 数值验证直接使用本表默认值。
 
 from __future__ import annotations
 
-# ---- Rhythm 节律（§4.1）----
-RHYTHM = {
-    "base_rate_bpm": 12.0,     # 平静呼吸 12 次/分（5s 一周期）
-    "max_rate_bpm": 24.0,      # 兴奋上限
-    "base_depth": 0.4,         # 安静浅呼吸
-    "arousal_tau_s": 4.0,      # arousal 一阶滞后
-    "heartbeat_ratio": 4,      # 心跳 = 呼吸 × 4
-    "noise_amp": 0.02,         # 呼吸波形微噪声
-    # P1.1 修复：惊吓呼吸脉冲（独立指数衰减，不被一帧抹掉）
-    "burst_tau_s": 20.0,       # 惊吓喘息衰减时间尺度
-    "burst_rate_bpm": 7.0,     # 惊吓瞬时呼吸加速（相对）
-    "burst_depth_add": 0.30,   # 惊吓瞬时呼吸加深
-    # P1.1 修复：睡眠呼吸慢而深、波形平稳
-    "sleep_depth_boost": 0.18,
-    "sleep_noise_scale": 0.2,
-}
-
 # ---- Anticipation 预感（§4.2）----
 # scale：该键观测偏差的归一化尺度（相对偏差 = |obs-expected| / scale，clamp 0..1）
 # conf 随样本上升至 0.9
@@ -51,13 +34,6 @@ TENSION = {
         "attachment": {"k": 0.00050, "min": 0.0, "max": 1.0},
     },
     "ripple_tau_s": 300.0,     # 事件涟漪衰减（分钟级）
-}
-
-# ---- Affect 天气（§4.4 / P3：加平静基线，日常底色=多云而非阴）----
-AFFECT = {
-    "base_regress_tau_s": 3600.0,  # 底色慢回归平静（P0 实测 15min 太短，改为 1h）
-    "pulse_decay_tau_s": 60.0,     # 波澜衰减
-    "baseline": 0.35,              # 平静底色（多云档）：日常即轻松；开心转晴，失落才下雨
 }
 
 # ---- Will 意愿（§4.5）----

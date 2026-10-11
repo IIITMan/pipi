@@ -260,13 +260,13 @@ class PulseRuntime:
     def on_barge_in(self) -> None:
         """被主人打断：意图挂起 + 委屈波澜（下一次 Will 重试/放弃）；夜间保持清醒。"""
         self.loop.will.interrupt()
-        self.loop.affect.push_base(-0.10)
+        self.loop.push_mood_base(-0.10)
         self.loop.wake(10.0)
         self._event_log("barge_in", "被主人打断")
 
     def on_response_done(self) -> None:
         """一轮应答完成：小回暖 + 互动计数；夜间再保持 10 分钟清醒才睡回去。"""
-        self.loop.affect.push_base(0.06)
+        self.loop.push_mood_base(0.06)
         self.loop.bond.interact()
         self.loop.wake(10.0)
         self._event_log("response_done", "一轮应答完成")
@@ -281,7 +281,7 @@ class PulseRuntime:
         key = (mood or "平静").strip()
         d = _MOOD_BASE.get(key, _MOOD_BASE.get(key.upper(), 0.0))
         if d:
-            self.loop.affect.push_base(d)
+            self.loop.push_mood_base(d)
         self.loop.bond.interact()
         # 留痕最近对话情绪（监控"心情"可见，60s 后回落）
         self._last_chat_mood = key

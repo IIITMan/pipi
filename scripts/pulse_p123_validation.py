@@ -123,7 +123,7 @@ def simulate(days: int, mode: str, seed: int) -> dict:
         # 事件注入（按仿真分钟）
         for minute, kind, kw in by_day.get(day, []):
             if sim_min % 1440 == minute:
-                pre_rate = loop.rhythm.rate_bpm      # 受惊前基线
+                pre_rate = loop._breath_rate      # 受惊前基线
                 msg = loop.inject(kind, minute=sim_min % 1440, **kw)
                 if kind == "owner_arrive":
                     reunion_texts.append(msg)
@@ -133,7 +133,7 @@ def simulate(days: int, mode: str, seed: int) -> dict:
                     loop.tick(1.0, hour)
                     startle_burst.append({
                         "t": sim_min, "pre": pre_rate,
-                        "peak": loop.rhythm.rate_bpm})
+                        "peak": loop._breath_rate})
                 elif msg:
                     pass   # 事件行不推进时钟（避免注入处重复推进）
 
@@ -146,11 +146,11 @@ def simulate(days: int, mode: str, seed: int) -> dict:
         if sim_min % 120 == 0:
             samples.append({
                 "sim_min": sim_min,
-                "rate": round(tk["breath"].rate_bpm, 2),
-                "depth": round(tk["breath"].depth, 3),
+                "rate": round(tk["breath"]["rate_bpm"], 2),
+                "depth": round(tk["breath"]["depth"], 3),
                 "lamp": round(tk["body"]["lamp"], 3),
                 "struggle": round(tk["tension"].struggle, 3),
-                "weather": tk["weather"].label,
+                "weather": tk["weather"]["label"],
                 "sleeping": tk["sleeping"],
                 "trust": round(loop.bond.trust, 2),
                 "sep_min": round(loop.sep_min, 0),
