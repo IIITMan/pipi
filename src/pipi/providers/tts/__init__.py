@@ -27,6 +27,8 @@ def create_tts(name: str, cfg: Any) -> TTSProvider | None:
             emotion_instruction=sub.get("emotion_instruction", True),
             cache_enabled=sub.get("cache_enabled", True),
             cache_dir=sub.get("cache_dir", "data/tts_cache"),
+            pitch=sub.get("pitch", 0),
+            speed=sub.get("speed", 1.0),
         )
         return p if p.is_available() else None
 

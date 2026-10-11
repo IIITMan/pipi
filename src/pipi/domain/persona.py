@@ -81,6 +81,8 @@ class PersonaSpec:
     # ---- 人格级覆盖（定义了就盖掉全局配置，build_app 启动时应用）----
     bot_name: str | None = None              # 皮皮自己的名字（贾维斯 → "贾维斯"）
     wake_words: list[str] | None = None      # 独立唤醒词（["贾维斯", "jarvis"]）
+    pitch: int | None = None                 # 音调 [-12,12]（负=低沉，正=清亮）
+    speed: float | None = None               # 语速系数（1.0=原速，0.95 略慢）
 
     # ---- 从 traits 派生的行为参数（编排层直接读这些，不读 traits）----
 
@@ -134,4 +136,6 @@ class PersonaSpec:
             description=data.get("description", ""),
             bot_name=data.get("bot_name"),
             wake_words=data.get("wake_words"),
+            pitch=data.get("pitch"),
+            speed=data.get("speed"),
         )

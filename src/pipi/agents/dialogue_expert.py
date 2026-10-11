@@ -31,7 +31,7 @@ _TOOL_RE = re.compile(
 _INTENT_RE = re.compile(r"^\s*\[(闲聊|聊天)\]\s*")
 
 def tool_protocol(city: str = "") -> str:
-    """工具/意图协议（动态：城市由 weather.city 全局配置注入）。"""
+    """工具/意图协议（动态：城市由 location.city 全局配置注入）。"""
     city_line = (f"用户所在城市：{city}。问天气时 [WEATHER:{city}] 直接填它，"
                  f"不要反问城市名。\n" if city else
                  "[WEATHER:城市] 直接填用户所在城市（系统配置里有），"

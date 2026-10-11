@@ -629,32 +629,16 @@ class ConversationOrchestrator:
         profile: UserProfile,
         now: float,
     ) -> None:
-        """记忆抽取、档案更新、状态落库。"""
-        written: list[str] = []
+        """记忆抽取（入缓冲，会话安静后批量抽取）、档案更新、状态落库。"""
         try:
-            # 1. 记忆抽取
+            # 1. 记忆：入批量缓冲（会话安静 15s 后由 memory_manager 统一抽取）
             intensity = ctx.emotion_state.intensity if ctx.emotion_state else 0.0
-            extracted = await self.memory.extract(
-                user_text, reply_text, profile, emotion_intensity=intensity
+            await self.memory.queue_turn(
+                user_id, user_text, reply_text, profile,
+                emotion_intensity=intensity,
             )
-            if extracted.candidates:
-                ids = await self.memory.commit(user_id, extracted.candidates, now)
-                written = list(ids or [])
-                # 2. 档案更新
-                changed = self.memory.apply_profile_updates(profile, extracted.profile_updates)
-                if changed:
-                    self.profile_repo.save(profile, now)
-                    if not profile.is_owner and profile.nickname:
-                        profile.is_owner = True
-                        self.user_repo.update(user_id, is_owner=1)
-                        # 成长系统 M1：认主（A4）
-                        if self.growth is not None:
-                            try:
-                                await self.growth.record_milestone(user_id, "M1", now)
-                            except Exception as exc:
-                                logger.warning("M1 记录失败：%s", exc)
         except Exception as exc:
-            logger.error("记忆写入失败：%s", exc)
+            logger.error("记忆缓冲失败：%s", exc)
 
         try:
             # 3. 情绪状态落库
@@ -773,6 +757,7 @@ class ConversationOrchestrator:
         那通常才是真正的台词。
         """
         text = re.sub(r"^\s*\[(闲聊|聊天)\]\s*", "", text, count=1)
+        text = re.sub(r"\[闲聊\]\s*", "", text)   # 多段回复中重复出现的标签
         if "\n" not in text:
             return text
         hits = sum(1 for k in self._REASONING_MARKERS if k in text)

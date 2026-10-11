@@ -535,6 +535,7 @@ class CLI:
         async def on_chunk(delta: str) -> None:
             if not state["printed"]:
                 state["ttfb_ms"] = int((_time.perf_counter() - t0) * 1000)
+                state["llm_ttfb_ms"] = getattr(self.app.llm, "last_latency_ms", 0)
                 print("皮皮 > ", end="", flush=True)
                 state["printed"] = True
             print(delta, end="", flush=True)
@@ -561,13 +562,17 @@ class CLI:
             self._speaker = None
         else:
             await self.orch.speak(result.bubbles)
-        if self.verbose:
-            total = (_time.perf_counter() - t0) * 1000
-            print(f"  ⏱ 首响 {state['ttfb_ms'] / 1000:.1f}s"
-                  f" ｜ 回完 {total / 1000:.1f}s"
-                  f" ｜ 记忆 召回{len(result.memories_used)}"
-                  f"/写入{len(result.memories_written)}"
-                  f"{' ｜ [降级]' if result.degraded else ''}", flush=True)
+        # 每轮对话的三环节耗时（用户要求：所有模式都输出）
+        total = (_time.perf_counter() - t0) * 1000
+        tts_ttfb = getattr(getattr(speaker, "tts", None), "last_ttfb_ms", 0)
+        print(f"  ⏱ ASR {self._session.last_asr_ms}ms"
+              f" ｜ LLM {state.get('llm_ttfb_ms', 0)}ms"
+              f" ｜ TTS {tts_ttfb}ms"
+              f" ｜ 首响 {state['ttfb_ms'] / 1000:.1f}s"
+              f" ｜ 回完 {total / 1000:.1f}s"
+              f" ｜ 记忆 召回{len(result.memories_used)}"
+              f"/写入{len(result.memories_written)}"
+              f"{' ｜ [降级]' if result.degraded else ''}", flush=True)
 
     async def _on_remote_chat(self, text: str) -> None:
         """远程文本聊天（静态监控页发来）：与语音共享记忆，语音优先。"""
@@ -594,7 +599,10 @@ class CLI:
                         result.emotion_state.mood.value)
 
     async def _say(self, text: str) -> None:
+        import time as _time
+
         self.app.proactive_engine.note_user_response(self.app.clock.now())
+        _t0 = _time.perf_counter()
         result = await self.orch.handle_turn(
             self.user_id, text, vision=await self._vision_for_turn(text),
             on_notice=lambda s: print(f"皮皮 > （{s}）", flush=True))
@@ -602,11 +610,14 @@ class CLI:
         for b in result.bubbles:
             print(f"皮皮 > {b.text}")
 
-        if self.verbose:
-            llm = getattr(self.app.llm, "last_latency_ms", 0)
-            print(f"  编排 {result.latency_ms}ms（LLM {llm}ms）"
-                  f"{' [降级]' if result.degraded else ''}"
-                  f" 记忆 召回{len(result.memories_used)}/写入{len(result.memories_written)}")
+        # 三环节耗时（文本模式无 ASR 环节）
+        llm = getattr(self.app.llm, "last_latency_ms", 0)
+        total = (_time.perf_counter() - _t0) * 1000
+        print(f"  ⏱ LLM {llm}ms"
+              f" ｜ 回完 {total:.0f}ms"
+              f" ｜ 记忆 召回{len(result.memories_used)}"
+              f"/写入{len(result.memories_written)}"
+              f"{' ｜ [降级]' if result.degraded else ''}", flush=True)
         print()
 
         # 给异步落库一点时间
@@ -868,6 +879,13 @@ async def run_cli(sim: bool = False, user_id: str = "owner",
         cli = CLI(app, user_id=user_id, verbose=verbose, voice=voice)
         await cli.run()
     finally:
+        # 退出前冲刷记忆缓冲：先给刚创建的 _post_turn 任务 1s 起步
+        # （入缓冲），再统一抽取落库 —— 防进程结束丢失 pending
+        try:
+            await asyncio.sleep(1.0)
+            await asyncio.wait_for(app.memory.flush_pending(), timeout=25)
+        except Exception as exc:
+            logger.warning("退出时记忆冲刷失败：%s", exc)
         app.close()
 
 

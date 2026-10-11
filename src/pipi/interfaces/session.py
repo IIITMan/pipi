@@ -288,6 +288,7 @@ class InteractionSession:
         self.barge_min_ms = cfg.get("audio.mic.session.barge_in_min_ms", 200)
         self.barge_arm_s = cfg.get("audio.mic.session.barge_in_arm_s", 0.6)
         self.barge_mult = cfg.get("audio.mic.session.barge_in_multiplier", 1.6)
+        self.barge_diag = cfg.get("audio.mic.session.barge_diag", False)
         self._echo_rms = 0.0            # 扬声器回声 RMS 基线（EMA，打断线用）
         self._last_barge_diag = 0.0     # 打断诊断节流
 
@@ -727,8 +728,8 @@ class InteractionSession:
         if self._loud_frames * (self.FRAME_MS * 1000) >= self.barge_min_ms:
             self._do_barge_in(now)
             return
-        # 诊断：打断打不进时看数值差距（verbose 下每 1.5s 一条）
-        if self.verbose and now - self._last_barge_diag > 1.5:
+        # 诊断：打断打不进时看数值差距（barge_diag 开启时每 1.5s 一条）
+        if self.barge_diag and now - self._last_barge_diag > 1.5:
             self._last_barge_diag = now
             self._notify(f"  [打断诊断] 当前RMS {level:.0f} / "
                          f"需 {line:.0f}（回声基线 {self._echo_rms:.0f}）")

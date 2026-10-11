@@ -148,6 +148,10 @@ def apply_persona_overrides(cfg: Config, persona: PersonaSpec) -> None:
         cfg.set("audio.mic.wake_words", list(persona.wake_words))
     if persona.voice_id:
         cfg.set("audio.tts.ark_tts.speaker", persona.voice_id)
+    if persona.pitch is not None:
+        cfg.set("audio.tts.ark_tts.pitch", persona.pitch)
+    if persona.speed is not None:
+        cfg.set("audio.tts.ark_tts.speed", persona.speed)
 
 
 def build_repos(db: Database) -> Repos:
@@ -449,7 +453,7 @@ def build_app(cfg: Config | None = None, *, sim: bool = False,
         use_cheap_routing=cfg.get("llm.routing.enabled", True),
         simple_max_chars=cfg.get("llm.routing.simple_max_chars", 8),
         growth=growth_engine,
-        city=cfg.get("weather.city", "济南"),   # 全局城市 → 意图协议注入
+        city=cfg.get("location.city", "济南"),   # 全局城市 → 意图协议注入
     )
 
     # 编排器
@@ -467,12 +471,33 @@ def build_app(cfg: Config | None = None, *, sim: bool = False,
         cfg=cfg,
     )
 
-    # 天气工具（免费 Open-Meteo，零成本；失败静默降级）
+    # 记忆批量抽取完成后的档案更新 + 认主 M1（原每轮逻辑移至此处）
+    async def _on_memory_flush(written: int, profile_updates: dict,
+                               user_id: str) -> None:
+        if not profile_updates:
+            return
+        profile = orchestrator.get_profile(user_id)
+        changed = memory_mgr.apply_profile_updates(profile, profile_updates)
+        if changed:
+            profile_repo.save(profile, time.time())
+            if not profile.is_owner and profile.nickname:
+                profile.is_owner = True
+                user_repo.update(user_id, is_owner=1)
+                if growth_engine is not None:
+                    try:
+                        await growth_engine.record_milestone(user_id, "M1",
+                                                             time.time())
+                    except Exception as exc:
+                        logger.warning("M1 记录失败：%s", exc)
+
+    memory_mgr.on_flush = _on_memory_flush
+
+    # 天气工具（UAPIs 免费接口；失败静默降级）
     if cfg.get("weather.enabled", True):
         from pipi.capabilities.weather import WeatherService
 
         orchestrator.weather = WeatherService(
-            city=cfg.get("weather.city", "济南"))
+            city=cfg.get("location.city", "济南"))
 
     # 通用联网搜索（Bing→Wikipedia 多源链，零 key；贾维斯化 ①）
     if cfg.get("search.enabled", True):

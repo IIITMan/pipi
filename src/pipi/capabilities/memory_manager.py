@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -127,23 +128,79 @@ class MemoryManager:
         self.pin_types = pin_types or {MemoryType.IDENTITY, MemoryType.COMMITMENT}
         self.top_k = top_k
         self.max_per_type = max_per_type
+        self._queue_turns: list[tuple] = []        # 会话级批量抽取缓冲
+        self._flush_task: asyncio.Task | None = None
+        self.on_flush: Any | None = None   # hook(written, profile_updates, user_id)
 
     # ------------------------------------------------------------------
-    # 抽取
+    # 抽取（会话级批量：每轮入缓冲，会话安静 15s 后合并抽取一次）
     # ------------------------------------------------------------------
 
-    # 记忆价值信号：命中则本轮立即抽取，否则攒轮合并（省 LLM 调用）
-    _WORTHY_KEYS = ("我叫", "我是", "我喜欢", "我不喜欢", "我讨厌", "记住",
-                    "别忘", "约定", "明天", "后天", "生日", "搬家", "辞职",
-                    "工作", "上学", "名字", "结婚", "生病", "买", "送",
-                    "第一次", "答应")
+    _FLUSH_DELAY_S = 15.0       # 会话超时 10s + 余量：安静即视为"一整轮对话结束"
 
-    def _worth_extracting(self, user_text: str, reply_text: str) -> bool:
-        """本轮是否值得立即抽记忆（短闲聊攒轮合并，砍无效 LLM 调用）。"""
-        combined = f"{user_text}{reply_text}"
-        if len(combined) >= 25:               # 有实质内容
-            return True
-        return any(k in user_text for k in self._WORTHY_KEYS)
+    async def queue_turn(
+        self,
+        user_id: str,
+        user_text: str,
+        reply_text: str = "",
+        profile: UserProfile | None = None,
+        emotion_intensity: float = 0.0,
+    ) -> None:
+        """一轮对话入缓冲（不调 LLM）。会话安静 _FLUSH_DELAY_S 后批量抽取。"""
+        self._queue_turns.append(
+            (user_id, user_text, reply_text, profile, emotion_intensity))
+        if self._flush_task is None or self._flush_task.done():
+            self._flush_task = asyncio.create_task(self._delayed_flush())
+
+    async def _delayed_flush(self) -> None:
+        await asyncio.sleep(self._FLUSH_DELAY_S)
+        if self._queue_turns:
+            try:
+                await self.flush_pending()
+            except Exception as exc:
+                logger.warning("批量记忆抽取失败（忽略）：%s", exc)
+
+    async def flush_pending(self) -> int:
+        """把缓冲的全部对话合并成一次 LLM 抽取并落库。返回写入条数。
+
+        抽取出的 profile_updates 经 on_flush hook 交给编排层
+        （档案更新/认主 M1 依赖 profile_repo 与成长系统，在本类之外）。
+        """
+        pending, self._queue_turns = self._queue_turns, []
+        if not pending or self.llm is None:
+            return 0
+        user_id = pending[0][0]
+        convo = "\n".join(f"用户：{u}\n皮皮：{r}" for _, u, r, _, _ in pending)
+        intensity = max((p[4] or 0.0) for p in pending)
+        now = time.time()
+        written, profile_updates = 0, {}
+        try:
+            result = await self._extract_with_llm(convo, "")
+            scored = self._score_and_finalize(result, convo, intensity)
+            profile_updates = scored.profile_updates
+            if scored.candidates:
+                ids = await self.commit(user_id, scored.candidates, now)
+                written = len(ids or [])
+        except Exception as exc:
+            logger.warning("批量抽取失败，回退规则抽取：%s", exc)
+            try:
+                scored = self._score_and_finalize(
+                    self._extract_with_rules(convo, intensity),
+                    convo, intensity)
+                profile_updates = scored.profile_updates
+                if scored.candidates:
+                    ids = await self.commit(user_id, scored.candidates, now)
+                    written = len(ids or [])
+            except Exception as exc2:
+                logger.warning("规则抽取兜底也失败：%s", exc2)
+        if self.on_flush is not None and (written or profile_updates):
+            try:
+                r = self.on_flush(written, profile_updates, user_id)
+                if asyncio.iscoroutine(r):
+                    await r
+            except Exception as exc:
+                logger.debug("on_flush 回调失败（忽略）：%s", exc)
+        return written
 
     async def extract(
         self,
@@ -152,23 +209,7 @@ class MemoryManager:
         profile: UserProfile | None = None,
         emotion_intensity: float = 0.0,
     ) -> ExtractResult:
-        """从一轮对话中抽取值得长期记住的信息。
-
-        攒轮策略：无记忆价值的短闲聊先进缓冲，凑满 3 轮合并抽一次 ——
-        避免每轮都烧一次 LLM（实测短闲聊抽取全返回空）。
-        """
-        pending: list[tuple[str, str]] = getattr(self, "_pending_turns", [])
-        if not self._worth_extracting(user_text, reply_text):
-            pending.append((user_text, reply_text))
-            self._pending_turns = pending
-            if len(pending) < 3:
-                return ExtractResult(method="skip")
-            # 攒满 3 轮 → 合并成一段批量抽
-            user_text = "\n".join(f"用户：{u}\n皮皮：{r}"
-                                  for u, r in pending)
-            reply_text = ""
-            self._pending_turns = []
-
+        """（兼容保留）单轮立即抽取。日常路径请用 queue_turn + flush_pending。"""
         # 优先尝试 LLM 抽取
         if self.llm is not None:
             try:

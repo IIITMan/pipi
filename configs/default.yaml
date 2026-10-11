@@ -17,10 +17,14 @@ user:
   default_user_id: "owner"
   adoption_on_first_run: true   # 首次运行皮皮主动问名字（领养仪式）
 
+# ---------------- 所在地 ----------------
+location:
+  city: "济南"                  # 用户所在城市（全局默认：天气查询/意图协议，
+                                # 不指定城市的场景都用它）
+
 # ---------------- 天气 ----------------
 weather:
   enabled: true
-  city: "济南"                  # 默认城市（全局通用：天气查询/意图协议）
   sync_interval_s: 1800         # 真实天气 → 生命模块的同步间隔
 
 # ---------------- 联网搜索 ----------------
@@ -81,27 +85,12 @@ memory:
   export_enabled: true
 
 # ---------------- 语音 ----------------
-# 模式：cascade（ASR→LLM→TTS 串联，当前）| realtime（火山 S2S，待接入）
-# hybrid 目标形态见 docs/LLM_SELECTION.md §9；工具调用必须走文本链
+# 架构：cascade（ASR → LLM → TTS 串联）。端到端 S2S 方案已评估未采纳
+# （工具调用插不进无中间文本的链路，见 docs/LLM_SELECTION.md §9）。
 audio:
   enabled: true
   sample_rate: 16000
   frame_ms: 30
-  mode: "cascade"
-
-  realtime:                     # 端到端 S2S（未接入保持关闭）
-    enabled: false
-    endpoint: "wss://openspeech.bytedance.com/api/v3/realtime/dialog"
-    resource_id: "volc.speech.dialog"
-    app_id: ""
-    access_token: ""            # PIPI_AUDIO__REALTIME__ACCESS_TOKEN
-    voice: "zh_female_vv_jupiter_bigtts"
-    persona_instruction: ""     # 运行时由 persona 填充
-    observability:
-      save_transcript: true
-      save_llm_text: true
-      moderation: true
-    delegate_to_agent: ["记忆写入", "记忆查询", "天气", "云台动作", "回充", "控制指令"]
 
   asr_chain: ["sensevoice"]     # 唯一方案 sherpa-onnx，无降级
   asr:
@@ -152,7 +141,7 @@ audio:
       keywords_threshold: 0.25
       min_speech_s: 0.3
     voiceprint:                 # 声纹认主（首次说话自动登记）
-      enabled: true
+      enabled: false
       model: "data/models/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx"
       threshold: 0.5            # ≥ 主人；< reject → 陌生人
       reject_threshold: 0.35

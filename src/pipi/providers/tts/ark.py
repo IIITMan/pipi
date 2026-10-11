@@ -20,6 +20,7 @@ import hashlib
 import json
 import logging
 import threading
+import time
 import uuid
 from pathlib import Path
 from typing import Any, AsyncIterator
@@ -50,7 +51,8 @@ class ArkTTS:
                  bitrate: int = 160000, emotion_instruction: bool = True,
                  timeout_s: float = 30.0, endpoint: str = "",
                  cache_enabled: bool = True, cache_dir: str = "data/tts_cache",
-                 cache_max_chars: int = 120, cache_max_files: int = 300):
+                 cache_max_chars: int = 120, cache_max_files: int = 300,
+                 pitch: int = 0, speed: float = 1.0):
         self.api_key = api_key
         self.resource_id = resource_id
         self.speaker = speaker
@@ -58,6 +60,8 @@ class ArkTTS:
         self.sample_rate = sample_rate
         self.bitrate = bitrate
         self.emotion_instruction = emotion_instruction
+        self.pitch = int(pitch)     # 音调 [-12,12]，0=原声（人格可配）
+        self.speed = float(speed)   # 默认语速系数（1.0=原速，人格可配）
         self.timeout_s = timeout_s
         self.endpoint = endpoint or self.ENDPOINT
         self.cache_enabled = cache_enabled
@@ -82,9 +86,12 @@ class ArkTTS:
             "sample_rate": self.sample_rate,
             "bit_rate": self.bitrate,
         }
-        if req.speed != 1.0:
+        speed = req.speed if req.speed != 1.0 else self.speed
+        if speed != 1.0:
             # speed 1.0=原速；speech_rate [-50,100]，100=2.0 倍速
-            audio_params["speech_rate"] = int(round((req.speed - 1.0) * 100))
+            audio_params["speech_rate"] = int(round((speed - 1.0) * 100))
+        if self.pitch:
+            audio_params["pitch"] = self.pitch   # 音调 [-12,12]，正=高负=低
         params: dict = {
             "text": req.text,
             "speaker": req.voice_id or self.speaker,
@@ -189,6 +196,8 @@ class ArkTTS:
         threading.Thread(target=_worker, daemon=True).start()
 
         got_audio = False
+        synth_t0 = time.perf_counter()
+        self.last_ttfb_ms = 0          # 首个音频块到达耗时（TTS 首包）
         error: Exception | None = None
         while True:
             kind, item = await q.get()
@@ -200,7 +209,10 @@ class ArkTTS:
                     raise RuntimeError(f"方舟 TTS 错误 {code}: {message}")
                 data = item.get("data")
                 if data:
-                    got_audio = True
+                    if not got_audio:
+                        got_audio = True
+                        self.last_ttfb_ms = int(
+                            (time.perf_counter() - synth_t0) * 1000)
                     yield AudioChunk(pcm=base64.b64decode(data),
                                      sample_rate=self.sample_rate)
             elif kind == "error":
@@ -219,8 +231,8 @@ class ArkTTS:
     def _cache_path(self, text: str, emotion: str) -> Path:
         """缓存文件：文本+音色+情绪 的哈希 → data/tts_cache/{key}.mp3。"""
         key = hashlib.sha1(
-            f"{self.speaker}|{self.resource_id}|{self.model}|{emotion}|{text}"
-            .encode("utf-8")).hexdigest()[:20]
+            f"{self.speaker}|{self.resource_id}|{self.model}|{self.pitch}|"
+            f"{self.speed}|{emotion}|{text}".encode("utf-8")).hexdigest()[:20]
         return self.cache_dir / f"{key}.mp3"
 
     def _touch_cache(self, path: Path) -> None:
