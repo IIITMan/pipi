@@ -140,7 +140,7 @@ python3 scripts/replay_session.py --limit 20 --export out.json
 python3 scripts/download_models.py --list
 python3 scripts/download_models.py --only asr
 
-# 集成验收（51 项断言）
+# 集成验收（48 项断言）
 python3 tests/integration/test_proactive_vision.py
 
 # 核心链路走查（对话/情感/记忆 端到端冒烟 + 改名一致性）
@@ -182,8 +182,8 @@ src/pipi/
 ├── providers/        # 各能力的实现（asr/tts/vision/llm/motion/memory）
 ├── capabilities/     # 跨 Provider 的业务能力（记忆/情绪/表达/感知）
 ├── agents/           # 三 Agent 分工 + 能力路由器
-├── orchestration/    # 主编排 + 主动引擎 + 生命模块调度
-├── life/             # 生命引擎：内在状态 / 自发念头 / 行为调度
+├── orchestration/    # 主编排 + 主动/成长/回充引擎
+├── pulse/            # PULSE 心搏：驱力/意愿/羁绊/日记（8→4 精简，见 docs/PULSE_DESIGN.md）
 ├── interfaces/       # CLI（窗口端，内嵌 WS 推送）
 └── prompts/          # 人格与任务模板
 web/monitor.html      # 纯静态监控页（WS 订阅，双击即开）
@@ -373,7 +373,9 @@ MIT
 | 文件 | 内容 |
 |---|---|
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 软件架构、模块划分、数据流 |
-| [`docs/LIFE_MODULE_NOTES.md`](docs/LIFE_MODULE_NOTES.md) | 生命模块设计落地与审计留痕 |
+| [`docs/PULSE_DESIGN.md`](docs/PULSE_DESIGN.md) | PULSE 心搏设计（8→4 精简后现行状态） |
+| [`docs/PULSE_RUNTIME_INTEGRATION.md`](docs/PULSE_RUNTIME_INTEGRATION.md) | PULSE 真实系统接入说明（配置/事件映射/监控） |
+| [`docs/PULSE_VALIDATION_REPORT.md`](docs/PULSE_VALIDATION_REPORT.md) | PULSE P0–P4 验证总报告 |
 | [`docs/GROWTH_DESIGN.md`](docs/GROWTH_DESIGN.md) | 成长系统设计（关系阶段/里程碑/偏好演化） |
 | [`docs/HARDWARE.md`](docs/HARDWARE.md) | 硬件选型、BOM、三档预算方案 |
 | [`docs/CHASSIS.md`](docs/CHASSIS.md) | 麦轮底盘机械设计（含自动回充与充电桩） |

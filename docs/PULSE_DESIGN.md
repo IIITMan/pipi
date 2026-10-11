@@ -1,8 +1,8 @@
-# PULSE · 心搏 —— 生命模块重设计（v0.1 设计文档）
+# PULSE · 心搏 —— 生命模块设计（v0.2 · 8→4 精简后现行状态）
 
-> 状态：设计定稿，待实施
-> 范围：**完全取代**现有 `src/pipi/life/`（保留一个版本后废弃），新包 `src/pipi/pulse/`
-> 一句话：一个会搏动、会生长的活体内核 —— 一个生命循环 × 八个器官 × 三个时间尺度
+> 状态：✅ 已实施（2026-10-11 完成 8→4 精简，消融证据 `scripts/pulse_ablation.py`）
+> 范围：已**取代** `src/pipi/life/`（旧包已删除），实现为 `src/pipi/pulse/`
+> 一句话：一个会搏动、会生长的活体内核 —— 一个生命循环 × 四核心器官 × 派生/轻量状态
 > 复用：vision / memory / 语音 / reminders 全部作为器官输入，不重复建设
 
 ---
@@ -39,20 +39,27 @@ LLM 只在"需要变成语言"时低频介入（发声渲染 + 每日一次睡�
 
 ## 3. 三个嵌套时间尺度
 
-| 尺度 | 周期 | 器官 | 对应生命活动 |
+| 尺度 | 周期 | 器官/状态 | 对应生命活动 |
 |---|---|---|---|
-| 即时（反射） | 0.1–1s | Rhythm · Anticipation | 呼吸心跳波形、惊吓/眨眼/躲避、惊讶 |
-| 行为（自主） | 5s–分钟 | Tension · Affect · Will | 驱力评估、意愿形成、巡逻/探索/发呆 |
-| 生命（发育） | 小时–天 | Bond · River · Seed | 思念曲线、睡眠整理做梦、个性发育 |
+| 即时（反射） | 0.1–1s | 派生呼吸（derive.py）· 惊吓门控（loop 习惯化） | 呼吸心跳波形、惊吓/眨眼/躲避、惊讶 |
+| 行为（自主） | 5s–分钟 | Tension · Will | 驱力评估、意愿形成、巡逻/探索/发呆 |
+| 生命（发育） | 小时–天 | Bond · River · 气质字段（loop） | 思念曲线、睡眠整理做梦、个性发育 |
 
 ---
 
-## 4. 八个器官（数值模型与接口）
+## 4. 器官与状态（数值模型与接口）
 
-> 全部数值默认值即 `pulse/config.py` 的默认参数，均可在 `life.pulse.*` 配置段覆盖。
+> 全部数值默认值即 `pulse/config.py` 的默认参数，均可在 `pulse.*` 配置段覆盖。
 > 所有 `tick()` 均为纯函数式更新（输入 dt + 事件，输出快照），便于单测。
+> **8→4 现状**：核心器官 Tension/Will/Bond/River 保留；Affect/Rhythm 降为派生层
+> （§4.1/§4.4，消融证明纯展示）；Anticipation 删除（§4.2，只损惊吓门控）；
+> Seed 内嵌 loop 气质字段（§4.8）。以下各节保留原设计供对照，"精简去向"标注现状。
 
-### 4.1 Rhythm 节律（即时）—— 它真的在呼吸
+### 4.1 Rhythm 节律（即时）—— 它真的在呼吸【8→4 已精简】
+
+> **精简去向**：消融证明 Rhythm 禁用后全部行为指标零变化（纯展示）→ 降为派生层
+> `pulse/derive.py` 的 `breath_step()`（一阶滞后 τ=4s、惊吓脉冲 τ=20s），呼吸状态
+> 由 loop 字段 `_breath_rate/_breath_depth/_breath_phase/_arousal` 承载。
 
 **目的**：给整个系统一个真实的"身体节奏"，呼吸/心跳是**运行中的波形**而非状态位。
 
@@ -65,17 +72,20 @@ LLM 只在"需要变成语言"时低频介入（发声渲染 + 每日一次睡�
 
 **动力学**：`phase += dt × rate_bpm / 60`；`rate_bpm` 由 `arousal`（= Tension 总和 + 外部刺激）平滑追随（一阶滞后 τ=4s）；波形 = `depth × sin(2π·phase) + 微噪声`。
 
-**身心耦合**：arousal ↑ → 呼吸快而深；反之呼吸深浅经 Affect 底色回灌（松弛呼吸 → 底色回暖）。
+**身心耦合**：arousal ↑ → 呼吸快而深；反之呼吸深浅经底色回灌（松弛呼吸 → 底色回暖）。
 
-**接口**
+**接口（derive.py）**
 ```python
-class Rhythm:
-    def tick(self, dt: float, arousal: float) -> BreathSample: ...
-    def trigger_arousal(self, pulse: float) -> None: ...   # 外部刺激（惊吓/惊喜）
-    # BreathSample{phase: float, depth: float, rate_bpm: float}
+def breath_step(rate: float, depth: float, phase: float, arousal: float,
+                burst: float, dt: float) -> BreathSample: ...
 ```
 
-### 4.2 Anticipation 预感（即时）—— 只被"意外"触发
+### 4.2 Anticipation 预感（即时）—— 只被"意外"触发【8→4 已删除】
+
+> **精简去向**：消融证明 Anticipation 禁用仅惊吓 2→0（只损惊吓门控）→ 器官删除。
+> 惊吓触发简化为 loop 习惯化字段 `_habit_done = {"stranger": False, "night_noise": False}`
+> （异常事件终身只吓一次，符合原 conf 学习收敛后的行为）；傍晚归作息学习简化为
+> EMA 字段 `_expected_return`（0.7×旧 + 0.3×实际分钟）。以下为原设计（供对照）。
 
 **目的**：惊讶/好奇/安心有真实因果：预测被违反才惊讶，应验才安心。
 
@@ -105,7 +115,7 @@ class Anticipation:
 | 波 | 含义 | 目标来源 | 冷却/增益 |
 |---|---|---|---|
 | loneliness 孤独 | 想有人陪 | 独处时长、Bond 思念曲线 | 对话即大幅回落 |
-| curiosity 好奇 | 想看看发生了什么 | Anticipation 好奇、陌生刺激 | 探索后回落 |
+| curiosity 好奇 | 想看看发生了什么 | 陌生刺激（loop 注入） | 探索后回落 |
 | sleepiness 困 | 想睡 | 昼夜节律（夜晚 target↑） | 睡眠后重置 |
 | security 安全 | 安心程度（越低越警觉） | 陌生人/噪声/独处深夜 | 主人陪伴回升 |
 | attachment 依恋 | 想靠近主人 | 与 owner 距离、Bond trust | 靠近/互动回落 |
@@ -125,7 +135,12 @@ class TensionField:
     # TensionSnapshot{dominant: str, struggle: float, waves: dict[str,float]}
 ```
 
-### 4.4 Affect 天气（行为）—— 连续的身体天气，不是表情标签
+### 4.4 Affect 天气（行为）—— 连续的身体天气，不是表情标签【8→4 已精简】
+
+> **精简去向**：消融证明 Affect 禁用后全部行为指标零变化（纯展示）→ 降为派生层
+> `pulse/derive.py`：`decay_mood()`（底色 τ=1h 回归平静基线 0.35，波澜 τ=60s 指数
+> 衰减）、`weather_label()`（唯一权威天气映射）；loop 以 `_mood_base/_mood_pulse/
+> _burst` 字段 + `push_mood_base/push_mood_pulse/trigger_burst` 承载。
 
 **目的**：情感是**双时间尺度**的连续场，通过呼吸/姿态/眼神表达，而非枚举标签。
 
@@ -164,7 +179,7 @@ class Affect:
 class Will:
     def decide(self, field: TensionSnapshot) -> Intent | None: ...
     def interrupt(self) -> None: ...
-    def settle(self, result: bool) -> Feeling: ...   # Feeling → Affect 波澜
+    def settle(self, result: bool) -> Feeling: ...   # Feeling → loop.push_mood_pulse
 ```
 
 ### 4.6 Bond 羁绊（生命）—— 依恋、思念曲线、认主
@@ -190,26 +205,27 @@ class Bond:
     def on_reunion(self) -> None: ...
 ```
 
-### 4.7 River 生命流（生命）—— 不可逆的河，入睡后"做梦"
+### 4.7 River 生命流（生命）—— 不可逆的河，入睡后"做梦"【8→4 已瘦身】
 
 **目的**：昨天和今天连续；睡眠把一天**编织成叙事**，醒来"我"更厚。
 
+> **8→4 瘦身**：删除 `day_stream`/`record`（5000 条缓冲无价值——`loop._diary` 是唯一
+> 当日事件源）；保留 `nights/self_depth/consolidate_night` 叙事模板（零 LLM 成文，
+> 模板 × 真实经历 × 确定性变体）。日记可经 `diary_memory=true` 写入长期记忆。
+
 | 状态 | 类型 | 默认值 |
 |---|---|---|
-| day_stream | deque[entry] | maxlen=5000（不可逆追加） |
+| nights | int | 0（累计睡眠整理次数） |
 | self_depth | int | 1（每次睡眠整理 +1） |
-| nights | int | 0 |
 
 **动力学**
-- 每行为刻度 `record(entry)`（事件/张力快照/关系变化）；
-- 入睡：`consolidate_night()` 回放 → LLM 一次压缩成"今日叙事"（存 memory，失败用模板摘要兜底）→ self_depth+1 → day_stream 归档；
+- 入睡：`consolidate_night()` 按当天事件统计 + 天气 + 思念峰值拼叙事 → self_depth+1；
 - 醒来：river 提供"昨天的事"给对话上下文（"你昨天回来得好晚"）。
 
 **接口**
 ```python
 class River:
-    def record(self, entry: dict) -> None: ...
-    async def consolidate_night(self) -> str: ...   # 返回今日叙事
+    def consolidate_night(self, diary: dict) -> str: ...   # 返回今日叙事（零 LLM）
     def self_depth(self) -> int: ...
 ```
 
@@ -232,12 +248,12 @@ class River:
 
 | 现象 | 机制来源 |
 |---|---|
-| 你突然出声，它真的"吓一跳" | Anticipation surprise > 阈值 → startle 脉冲 |
+| 你突然出声，它真的"吓一跳" | 异常事件（陌生人/夜噪）→ startle 脉冲（loop 习惯化，终身只吓一次） |
 | 出门后：正常 → 总往门口看 → 蔫了；回家精神一振 | Bond 思念曲线 + 重聚反应 |
-| 深夜呼吸变慢、真"睡了" | Rhythm 昼夜 + Tension.sleepiness |
+| 深夜呼吸变慢、真"睡了" | derive 呼吸昼夜 + Tension.sleepiness |
 | 第二天主动提起昨天的事 | River 睡眠叙事回读 |
 | 巡逻中听到动静停下来、改主意 | Will RECONSIDERING（张力场变化） |
-| 困到说话变慢、打哈欠、原地打盹 | Rhythm depth + Will IDLE→REST |
+| 困到说话变慢、打哈欠、原地打盹 | derive 呼吸深度 + Will IDLE→REST |
 | 被打断后委屈安静，又忍不住凑过来 | Will INTERRUPTED + Bond 依恋 |
 | 偶尔伸懒腰、哼歌、对窗外发呆 | Will 无用的事（低张力时段） |
 
@@ -247,26 +263,25 @@ class River:
 
 | 现有方案无法优化点 | PULSE 直接解决 |
 |---|---|
-| 无预测机制（惊讶=骰子） | Anticipation 预测误差 |
+| 无预测机制（惊讶=骰子） | 异常事件门控 + 习惯化（简化原 Anticipation 的收敛结果） |
 | 三轴无波动力学（无挣扎） | Tension 驱力波竞争 |
-| 无不可逆时间线（成长=外挂计分） | River + Seed（成长生理化） |
+| 无不可逆时间线（成长=外挂计分） | River + 气质字段（成长生理化） |
 | 状态钉在会话上（无独立生活） | Living Loop 自持状态机 |
 | 意愿无闭环（无改主意） | Will 意图状态机 |
-| 生命感挂 LLM（断网即塌） | Rhythm/Tension 本地波形 |
+| 生命感挂 LLM（断网即塌） | derive 呼吸 + Tension 本地波形 |
 
 可继承资产：事件驱动哲学、常驻低频任务、已接入的感知（vision）、监控页与测试基线。
 
 ---
 
-## 7. 包结构（新包，不污染旧代码）
+## 7. 包结构
 
 ```
 src/pipi/pulse/
 ├── __init__.py          # 导出 LivingLoop
-├── loop.py              # LivingLoop：快循环/行为/发育三尺度编排
+├── loop.py              # LivingLoop：快循环/行为/发育三尺度编排（含气质字段/习惯化）
 ├── clock.py             # 三尺度 tick 调度
 ├── organs/
-│   ├── rhythm.py        # Rhythm 4.1
 │   ├── tension.py       # Tension 4.3（驱力场，核心）
 │   ├── will.py          # Will 4.5（行为仲裁，核心）
 │   ├── bond.py          # Bond 4.6（关系，核心）
@@ -297,8 +312,8 @@ class LivingLoop:
 - 验收：monitor 页出现呼吸曲线与潮汐面板；深夜自动放缓呼吸；事件冲击产生涟漪
 - 依赖：现有 monitor.html 扩展；`pulse/config.py`
 
-### P2 预感与天气
-- 器官：Anticipation + Affect + Will(完整)
+### P2 预感与天气【8→4 已并入/派生】
+- 器官：Anticipation + Affect + Will(完整) → 现状：习惯化字段 + 派生天气 + Will(完整)
 - 目标：惊讶有因果；心情是身体天气；会改主意
 - 验收：真吓一跳（非随机）；行为中断后改主意；被打断有委屈波澜
 
@@ -307,10 +322,10 @@ class LivingLoop:
 - 目标：思念曲线与重聚提振
 - 验收：出门 30 分钟后蔫 → 回家精神一振
 
-### P4 河流与种子
-- 器官：River + Seed（接 memory）
+### P4 河流与种子【8→4 已并入】
+- 器官：River + Seed（接 memory）→ 现状：River 跨天整理 + loop 气质字段（日记可落记忆）
 - 目标：睡眠整理做梦；独特个性
-- 验收：第二天主动提起昨天；两只皮皮（不同 seed）行为可分辨
+- 验收：第二天主动提起昨天；两只皮皮（不同气质）行为可分辨
 
 ---
 
@@ -320,7 +335,7 @@ class LivingLoop:
 |---|---|
 | P1 计算 | 纯本地，约 1kHz 浮点级，RK3588 CPU 无压力 |
 | LLM 调用 | 仅发声渲染（同现状）+ 每日 1 次睡眠叙事；P1 零 LLM |
-| 内存 | 八器官状态 < 1MB；day_stream 上限 5000 条 |
+| 内存 | 四核心 + 派生状态 < 1MB（day_stream 已删） |
 | 移动端功耗 | 三尺度 tick 合并到 1 个循环（P2 后处理，修旧方案 4 循环问题） |
 
 ---
@@ -329,11 +344,11 @@ class LivingLoop:
 
 | 风险 | 对策 |
 |---|---|
-| 预测表冷启动（前 N 天无惊讶） | 种子预测（作息先验）+ 学习加速；P2 验收允许 3 天预热 |
+| 预测表冷启动（前 N 天无惊讶） | 已随 8→4 消除：异常事件不再依赖学习冷启动，直接门控（终身只吓一次） |
 | 张力参数调出来"像情绪病" | 全部参数进 config，monitor 页可视化调参；stability 单测 |
-| 睡眠整理 LLM 成本 | 每日 1 次、cheap 模型、失败模板兜底；可配关闭 |
-| 个性漂移失控 | Seed cap_offset ±3 档 + plasticity 随 self_depth 递减（护栏在数值层） |
-| 旧 life 并行的双轨发声 | 迁移期保留旧包只读，P1 起新循环为唯一发声源，P4 后删除旧包 |
+| 睡眠整理 LLM 成本 | 已归零：River 纯模板成文（零 LLM）；日记可选落记忆 |
+| 个性漂移失控 | 气质字段 cap ±3 + 塑性随 self_depth 递减（护栏在数值层） |
+| 旧 life 并行的双轨发声 | 已解决：旧包整体删除，PULSE 为唯一发声源 |
 
 ---
 
@@ -341,8 +356,8 @@ class LivingLoop:
 
 | 输入 | 接入 |
 |---|---|
-| perception 事件（owner_arrived/gone/stranger/表情） | `LivingLoop.inject()` → Anticipation/Bond/Tension |
-| 会话事件（user_voice/barge_in/response_done） | `inject()` → Rhythm.trigger_arousal / Will.interrupt / Affect |
+| perception 事件（owner_arrived/gone/stranger/表情） | `LivingLoop.inject()` → Bond/Tension/习惯化 |
+| 会话事件（user_voice/barge_in/response_done） | `inject()` → 呼吸脉冲（trigger_burst） / Will.interrupt / push_mood_pulse |
 | reminders 提醒/闹铃 | `inject()` → Will 意图（去提醒主人） |
-| memory（story/memory_getter） | River 叙事回读 / Seed 经历漂移 |
+| memory（MemoryManager） | River 叙事回读 / 气质经历漂移 / 日记落库（diary_memory=true） |
 | TTS/Barge-in 通道 | 复用现有 `session.try_speak_spontaneous`（发声渲染不变） |

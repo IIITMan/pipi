@@ -99,7 +99,7 @@
 **问题**：聊完天心情毫无变化。根因有二：
 1. cli 回灌的是中文情绪值（`emotion_state.mood.value`：开心/委屈/生气…），
    而 runtime 的 `_MOOD_BASE` 只有英文 key（HAPPY/SAD…），全部落空 → 零影响；
-2. 存在**两套不一致的天气映射**（`affect._label()` 与 runtime `_label_of()`），
+2. 存在**两套不一致的天气映射**（`derive._label` 与 runtime `_label_of`），
    同一 (base,pulse) 可能给出不同标签；且平静基线 0.18 落在"小雨"档（什么都没
    发生却显示下雨），强情绪也压不到对应档位。
 
@@ -107,7 +107,7 @@
 - `_MOOD_BASE` 同时支持英文枚举名与中文 mood.value（开心+0.18 / 委屈−0.14 /
   生气−0.16 / 吃醋−0.10 / 困倦−0.05 / 调皮+0.15…）；
 - 平静底色 baseline 0.18 → **0.35**（日常即轻松）；
-- 重标 `affect._label()` 为**唯一权威映射**，runtime 删除重复的 `_label_of`、
+- 重标 `derive.weather_label` 为**唯一权威映射**（8→4 后 Affect 已并入派生层），runtime 删除重复的 `_label_of`、
   直接读 loop 产出的 label；
 - snapshot 记录最近对话情绪 `last_chat_mood`（60s 内有效），监控 PULSE 面板
   新增「对话心情」与「正在听/正在说」。

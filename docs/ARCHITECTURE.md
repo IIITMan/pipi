@@ -38,7 +38,8 @@
 │     ├─ DialogueExpert          组装 Prompt → LLM → 原始回复         │
 │     ├─ ExpressionService       去 Markdown / 拆气泡 / 长度熔断      │
 │     └─[异步] 记忆写入 + 情绪落库 + 对话持久化                        │
-│   ProactiveEngine（何时该主动开口）· CapabilityRouter（降级决策）    │
+│   ProactiveEngine（何时该主动开口）· GrowthEngine（关系成长 S1-S4）
+│   CapabilityRouter（降级决策）· DockController（自动回充）
 ├───────────────────────────────────────────────────────────────────┤
 │ L3  能力层（"接口 + 多实现"，全部可 mock 可替换）                     │
 │   感知  PerceptionService · ASRProvider · VisionProvider            │
@@ -86,7 +87,9 @@
 │   ├── HARDWARE.md / CHASSIS.md  # 硬件选型 / 底盘机械设计
 │   ├── LLM_SELECTION.md          # 模型选型
 │   ├── GROWTH_DESIGN.md          # 成长系统设计（含验收标准）
-│   ├── LIFE_MODULE_NOTES.md      # 生命模块落地与审计留痕
+│   ├── PULSE_DESIGN.md          # PULSE 心搏设计（8→4 精简后现行状态）
+│   ├── PULSE_RUNTIME_INTEGRATION.md # PULSE 接入说明（配置/事件映射/监控）
+│   ├── PULSE_VALIDATION_REPORT.md   # PULSE P0–P4 验证总报告
 │   ├── CHASSIS_REPORT.html       # 底盘可视化报告
 │   └── 皮皮人格Prompt方案.md      # 人格 Prompt 设计
 ├── pyproject.toml                # 依赖分组（核心依赖为空 —— 不装也能跑）
@@ -141,10 +144,18 @@
 │   │   └── router.py             #   CapabilityRouter + CircuitBreaker
 │   ├── orchestration/            # L4 主编排
 │   │   ├── orchestrator.py       #   handle_turn / handle_proactive
-│   │   └── proactive.py          #   ProactiveEngine（频率/冷却/静默）
+│   │   ├── proactive.py          #   ProactiveEngine（频率/冷却/静默）
+│   │   ├── growth.py             #   GrowthEngine（关系成长 S1-S4/里程碑/偏好）
+│   │   └── dock.py               #   DockController（自动回充三段对齐）
 │   ├── hardware/                 # L0
 │   │   ├── sim/                  #   模拟摄像头
 │   │   └── rockchip/             #   RK3588 实现（预留）
+│   ├── pulse/                   # PULSE 心搏（生命模块，8→4 精简后唯一引擎）
+│   │   ├── loop.py              #   LivingLoop（驱力/意愿/羁绊/气质/习惯化）
+│   │   ├── runtime.py           #   PulseRuntime（asyncio 适配：tick/事件/发声/监控）
+│   │   ├── derive.py            #   派生展示层（天气/呼吸，Affect/Rhythm 精简去向）
+│   │   ├── perception.py        #   感知循环（摄像头→离散事件，自旧 life 迁入）
+│   │   └── organs/              #   tension · will · bond · river
 │   ├── interfaces/               # L5
 │   │   ├── cli.py                #   命令行
 │   │   └── web.py                #   FastAPI + SSE（遗留模式，已移除）
@@ -700,6 +711,7 @@ expression 层再做长度熔断兜底。
 | 好感度 | sqrt 压缩 + 关系底价 | 线性衰减会让长期关系归零，不符合真实心理 |
 | 视觉输入 | 翻译成自然语言 | 直接塞 JSON 会让模型露出"字段感" |
 | 硬件 | 主控（N100/N5015/RK3588）+ 轮趣 C30D 单板下位机 | Linux 调度抖动会毁掉舵机动作质量；单板省一条 UART 与一套固件 |
+| 生命模块 | PULSE 8→4 精简（消融驱动：Tension/Will/Bond 核心保留，Affect/Rhythm 派生化、Anticipation 习惯化、Seed 内嵌、legacy 删除） | 八器官状态过多、难以解释；消融实验证明四核心即维持全部行为保真 |
 
 ---
 
