@@ -127,6 +127,22 @@ def main() -> int:
     st2.apply_by_key("ignored")
     check("apply ignored 后情绪为平静", st2.mood == Mood.CALM, str(st2.mood))
 
+    # 衰减通道同护栏：tick_idle 只衰减好感/累积陪伴，不写委屈（§5.4）
+    st5 = EmotionState()
+    st5.last_interaction = 0.0
+    st5.tick_idle(3.0)
+    check("tick_idle 3h 后情绪保持平静（不推断委屈）",
+          st5.mood == Mood.CALM, str(st5.mood))
+    check("tick_idle 仍衰减好感", st5.affection < 500.0,
+          str(st5.affection))
+    check("tick_idle 仍累积陪伴需求", st5.companion_need > 0.0,
+          str(st5.companion_need))
+    st6 = EmotionState()
+    st6.last_interaction = 1.0
+    st6.tick_idle(48.0)
+    check("tick_idle 长时间（48h）同样不委屈",
+          st6.mood == Mood.CALM, str(st6.mood))
+
     print("== 2. 吃醋触发器学习开关 ==")
     eng = EmotionEngine(PersonaSpec(id="t", name="皮皮"))
     check("'别吃醋' 触发 opt-out", eng.check_rival_opt_out("别吃醋了"))

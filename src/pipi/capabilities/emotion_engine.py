@@ -233,6 +233,9 @@ class EmotionEngine:
         两个重要约束（否则"出差一个月回来变陌生人"）：
           1. 衰减用 sqrt 压缩，不是线性叠加 —— 第一天掉得最狠，之后钝化
           2. 好感度有"关系底价"，认主的人不会归零
+        契约 §5.4（情绪推断伦理护栏）：沉默**不推断委屈**——
+        这里只做行为性衰减与陪伴需求累积，不写负面情绪；
+        主动降频由 proactive 引擎负责。
         """
         if not state.last_interaction:
             state.last_interaction = now
@@ -247,9 +250,6 @@ class EmotionEngine:
         state.companion_need = min(
             1.0, state.companion_need + 0.15 * min(hours, 24.0))
 
-        if hours >= 2:
-            state.mood = Mood.AFFECTED
-            state.intensity = min(1.0, 0.4 + 0.1 * hours)
         state.updated_at = now
         return state
 

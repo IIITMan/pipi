@@ -201,7 +201,7 @@ async def test_triggers_by_clock(tmp: Path) -> None:
         uid, profile=profile, state=state, owner_present=False)
     print(f"  快进 5 小时后：should_fire={d.should_fire} trigger={d.trigger}"
           f" 理由={d.suppressed_by or d.reason}")
-    check(d.should_fire and d.trigger == "idle", "闲置 5 小时 → 想他/小委屈")
+    check(d.should_fire and d.trigger == "idle", "闲置 5 小时 → 想他/安静等待")
 
     # --- morning：早间问候 ---
     app2, clock2 = make_app(tmp / "morning", datetime(2025, 6, 11, 8, 0))

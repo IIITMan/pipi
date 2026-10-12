@@ -198,8 +198,11 @@ class EmotionState:
         注意：
           - 好感度**不是无限掉**的。长期不联系会下降，但存在一个
             "关系底价" —— 认过主的人不该因为出差一个月就变成陌生人。
-          - 下降也**不该随小时线性叠加**：用 sqrt 压缩，让第一天的
-            "你怎么不理我"感最强，之后逐渐钝化（符合真实心理）。
+          - 下降也**不该随小时线性叠加**：用 sqrt 压缩，第一天掉得最狠，
+            之后逐渐钝化（符合真实心理）。
+          - 契约 §5.4（情绪推断伦理护栏）：沉默**不推断委屈**——
+            这里只做行为性衰减与陪伴需求累积，情绪保持平静；
+            主动降频由 proactive 引擎负责。
         """
         if hours <= 0:
             return self
@@ -212,9 +215,6 @@ class EmotionState:
         self.companion_need = min(
             self.NEED_MAX, self.companion_need + 0.15 * min(hours, 24.0))
 
-        if hours >= 2:
-            self.mood = Mood.AFFECTED
-            self.intensity = min(1.0, 0.4 + 0.1 * hours)
         return self
 
     def affection_floor(self) -> float:

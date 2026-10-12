@@ -642,8 +642,8 @@ class PulseRuntime:
         """构造给 LLM 的内心事件（结合意图理由/分离时长，一句话）。"""
         sep_h = self.loop.sep_min / 60.0
         if kind == "loneliness":
-            return (f"你已经 {sep_h:.1f} 小时没见到主人了，有点想他、"
-                    "也有点小委屈，想主动说句话")
+            return (f"你已经 {sep_h:.1f} 小时没见到主人了，有点想他，"
+                    "安安静静地等着，想主动说句话")
         if kind == "curiosity":
             return "你察觉到一点动静，好奇心上来了，想主动念叨一句"
         if kind == "attachment":
