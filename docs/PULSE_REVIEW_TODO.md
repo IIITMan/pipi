@@ -35,6 +35,8 @@
 
 **验收总标准**：用实际数据（切换原因统计）证明——无关微扰不再导致切换；紧急事件仍即时响应；任务不被随意打断。
 
+**✅ 已落地（2026-10-13）**：`will.py` 实现 switch_margin=0.15 / min_dwell_ticks=2（min_dwell_time_s=10 ÷ 5s 判定）/ consecutive_to_switch=2 / urgent_override_threshold=0.25（diff≥0.25 视为环境突变立即切）；切换原因四类（dominant/completed/env/urgent + abandon 补充）+ `switch_log`/`switch_stats()` 统计口（区分合理灵活与无意义横跳）。探针四场景 + 全量回归通过。参数在 `config.py` WILL 字典。
+
 ---
 
 ## P0 · 器官故障三级隔离
@@ -51,6 +53,8 @@
 - 显式检查 **NaN、±inf、越界值、异常 dt**。
 - **仅 clamp 不够**：被限制到边界的异常值仍可能产生逻辑错误。
 - 检查**更新前后的状态合法性**，区分"可安全修复的异常"与"需隔离的异常"。
+
+**✅ 已落地（2026-10-13）**：新增 `src/pipi/pulse/fault.py`（OrganGuard：NaN/inf 拒绝 + 连续 N 次非法→隔离 + 连续 M 次正常→恢复 + sanitize_dt 拒绝负 dt/截断跳变），接入 `loop.tick`（tension 快照、呼吸/心境派生三级防护；tension 隔离→意图短路安全态）。探针：注入 NaN×5 → 隔离 → 意图短路 → 恢复；负 dt 拒绝、7200s 跳变截断。全量回归通过。
 
 ---
 

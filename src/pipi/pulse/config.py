@@ -24,6 +24,11 @@ WILL = {
     "useless_prob": 0.001,           # 低张力时段做"无用的事"概率（5s 判定一次）
     "useless_motions": ["stretch", "hum", "gaze_window"],
     "useless_cooldown_s": 1800.0,    # 无用的事冷却（30 分钟内最多一次）
+    # ---- P0 决策滞回（借 CE IntentManager 参数，见 PULSE_REVIEW_TODO P0-1）----
+    "switch_margin": 0.15,           # 新意图须领先当前意图 ≥0.15 才可切换
+    "min_dwell_ticks": 2,            # 普通意图最短持续（min_dwell_time_s=10 / 5s 判定）
+    "consecutive_to_switch": 2,      # 新意图连续占优次数（滞回，防微扰横跳）
+    "urgent_override_threshold": 0.25,  # 波值差 ≥0.25 = 环境突变，绕过 dwell/consecutive
 }
 
 # ---- Bond 羁绊（§4.6 / P3 完整化：思念曲线、认主关键期、重聚落差）----

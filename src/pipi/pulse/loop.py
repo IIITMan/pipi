@@ -11,6 +11,7 @@ import time
 from typing import Any
 
 from pipi.pulse import derive
+from pipi.pulse.fault import OrganGuard
 from pipi.pulse.organs.bond import Bond
 from pipi.pulse.organs.river import River
 from pipi.pulse.organs.tension import TensionField, TensionSnapshot
@@ -37,6 +38,11 @@ class LivingLoop:
         self.bond = Bond(cfg.get("bond"))
         self.river = River(cfg.get("river"))
         self.body = Body()
+
+        # P0-2 器官故障三级隔离（fault.py）：NaN/inf 拒绝 + 隔离窗口 + 关键安全态
+        self.fault = OrganGuard()
+        self._last_snap: TensionSnapshot | None = None
+        self._last_breath: dict | None = None
 
         # 气质成长（原 Seed）：五维基线 + 经历漂移（_seed_drift × 塑性）
         self._temperament = {axis: SEED_BASELINE for axis in SEED_AXES}
@@ -369,7 +375,13 @@ class LivingLoop:
 
     # ------------------------------------------------------------- 主循环一步
     def tick(self, dt: float, hour: float) -> dict:
-        """一帧：情境 → 器官 → 意图 → 身体。返回日志元素。"""
+        """一帧：情境 → 器官 → 意图 → 身体。返回日志元素。
+
+        P0-2 故障防护：dt 先过 sanitize（拒绝负/截断跳变）；tension 快照与
+        呼吸/心境派生输出做有限性校验（级1），连续非法隔离器官（级2），
+        tension 隔离时意图决策短路为安全态（级3）。
+        """
+        dt = self.fault.sanitize_dt(dt)
         self.sim_seconds += dt
         if not self.owner_present:
             self.sep_min += dt / MIN
@@ -408,12 +420,40 @@ class LivingLoop:
         breath = derive.breath_step(
             self._breath_rate, self._breath_depth, self._breath_phase,
             arousal, self._burst, dt, sleeping=self.sleeping)
+        if not self.fault.finite(breath["rate_bpm"],
+                                 breath["depth"], breath["phase"]):
+            # 级1：呼吸派生非法 → 沿用最后有效呼吸（器官不崩溃）
+            self.fault.record("derive", False)
+            breath = self._last_breath or {"rate_bpm": derive.BASE_RATE_BPM,
+                                           "depth": 0.4, "phase": 0.0}
+        else:
+            self.fault.record("derive", True)
+            self._last_breath = breath
         self._breath_rate = breath["rate_bpm"]
         self._breath_depth = breath["depth"]
         self._breath_phase = breath["phase"]
         snap = self.tension.update(dt, targets, sleeping=self.sleeping)
-        self._mood_base, self._mood_pulse = derive.decay_mood(
-            self._mood_base, self._mood_pulse, dt)
+        bad_waves = not self.fault.finite(*snap.waves.values())
+        if bad_waves or self.fault.is_isolated("tension"):
+            # 级1/级2：非法或被隔离 → 沿用最后有效快照（首拍即坏 → 安全波面）
+            self.fault.record("tension", not bad_waves)
+            if self._last_snap is not None:
+                snap = self._last_snap
+            else:
+                safe = {"loneliness": 0.05, "curiosity": 0.05,
+                        "sleepiness": 0.05, "security": 0.60,
+                        "attachment": 0.05}
+                snap = TensionSnapshot(dominant="sleepiness",
+                                       struggle=0.0, waves=safe)
+        else:
+            self.fault.record("tension", True)
+            self._last_snap = snap
+        m0, m1 = derive.decay_mood(self._mood_base, self._mood_pulse, dt)
+        if not self.fault.finite(m0, m1):
+            self.fault.record("mood", False)   # 级1：心境非法 → 保持上一拍
+        else:
+            self.fault.record("mood", True)
+            self._mood_base, self._mood_pulse = m0, m1
         weather = self._derive_weather()
         # P4：当天天气/思念素材（入睡成文用）
         self._weather_today[weather["label"]] = self._weather_today.get(
@@ -426,24 +466,30 @@ class LivingLoop:
         # 行为尺度：Will 5s 判定（累加器，任意 dt 都按 5s 粒度不漏判）
         # 意图在"改主意"前持续成立：will.current 是唯一权威，
         # decide 返回 None（未变）时保持，而非当作"没有意图"。
-        self._since_will += dt
-        while self._since_will >= 5.0:
-            self._since_will -= 5.0
-            new = self.will.decide(snap)
-            if new is not None and new.kind == "useless":
-                if self.sim_seconds - self._last_useless >= \
-                        self.will.cfg["useless_cooldown_s"]:
-                    self._last_useless = self.sim_seconds
-                    self.stats["useless"] += 1
-                else:
-                    self.will.current = None   # 冷却中：不做无用的事，回 idle
-            if new is not None and new.kind != "abandoned":
-                if self._prev_intent is not None \
-                        and self._prev_intent != new.kind:
-                    self.stats["intent_changes"] += 1
-                self._prev_intent = new.kind
-        intent = self.will.current
-        self._intent = intent
+        # 级3：tension 隔离时意图决策短路——关键器官失效 → 安全态（不动作）
+        if self.fault.is_isolated("tension"):
+            self.will.current = None
+            intent = None
+            self._intent = None
+        else:
+            self._since_will += dt
+            while self._since_will >= 5.0:
+                self._since_will -= 5.0
+                new = self.will.decide(snap)
+                if new is not None and new.kind == "useless":
+                    if self.sim_seconds - self._last_useless >= \
+                            self.will.cfg["useless_cooldown_s"]:
+                        self._last_useless = self.sim_seconds
+                        self.stats["useless"] += 1
+                    else:
+                        self.will.current = None   # 冷却中：不做无用的事，回 idle
+                if new is not None and new.kind != "abandoned":
+                    if self._prev_intent is not None \
+                            and self._prev_intent != new.kind:
+                        self.stats["intent_changes"] += 1
+                    self._prev_intent = new.kind
+            intent = self.will.current
+            self._intent = intent
 
         body = self.body.express(breath, snap, weather, intent,
                                  startle=self._startle)
