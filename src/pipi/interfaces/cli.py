@@ -271,6 +271,14 @@ class CLI:
             self.orch.inner_state_provider = rt.inner_brief
         except Exception:
             pass
+        # 成长阶段只读派生的 trust 源（契约 ENGINE_CONTRACTS §3：
+        # Bond.trust 为关系唯一权威，GrowthEngine 不再自持阶段）
+        growth = getattr(self.orch, "growth", None)
+        if growth is not None:
+            try:
+                growth.trust_provider = lambda uid, _rt=rt: _rt.loop.bond.trust
+            except Exception:
+                pass
         # 统一说话：主动发声也走 LLM（按内心事件渲染），句库在 runtime 内兜底
         async def _render_vocal(event, _cli=self):
             uid = getattr(_cli, "_active_uid", None) or "owner"

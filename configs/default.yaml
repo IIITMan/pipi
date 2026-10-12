@@ -176,10 +176,10 @@ pulse:
 growth:
   enabled: true
   relationship:
-    enabled: true               # 关系阶段机（S1~S4）
+    enabled: true               # 关系阶段机（S1~S4，只读派生：trust+里程碑+天数）
     stage_days: [0, 5, 30, 90]
     stage_milestones: [0, 1, 2, 3]
-    min_affection_s4: 550
+    min_trust_s4: 60            # S4 附加门槛：Bond.trust ≥ 60（替代旧 min_affection_s4）
     regress_days: 30
     regress_floor: 2            # 回落不低于 S2
   plasticity:                   # 可塑性曲线（S1 婴儿→S4 成熟）

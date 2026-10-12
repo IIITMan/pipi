@@ -1,7 +1,13 @@
-"""成长引擎 GrowthEngine —— 经历塑型，防速成（GROWTH_DESIGN v0.2）。
+"""成长引擎 GrowthEngine —— 事实记录 + 阶段只读派生（GROWTH_DESIGN v0.2）。
 
 接入方式（B1）：orchestrator._post_turn 末尾异步调用 `growth.on_turn(...)`。
 单向写入：只写不读、失败静默、绝不影响一轮回复（§2.4 单向性）。
+
+状态所有权（契约 docs/ENGINE_CONTRACTS.md §3，2026-10-13 调整）：
+  - 阶段 S1~S4 为**只读派生**：由 Bond.trust（关系唯一权威）+ 里程碑 + 活跃天数
+    计算，引擎不再写 users.relationship_stage（派生结果仅内存展示/审计日志）。
+  - 事实记录（里程碑/统计/偏好/口头禅）仍由本引擎唯一写入。
+  - S4 附加门槛：trust ≥ rel.min_trust_s4（默认 60），替代旧 affection 死门槛。
 
 核心机制：
   - 阶段机 S1~S4：硬性天数+里程碑门槛，不可跳跃；回落不低于 S2
@@ -16,7 +22,7 @@ from __future__ import annotations
 import logging
 import re
 import time
-from typing import Any
+from typing import Any, Callable
 
 from pipi.domain.growth import GrowthProfile, S4
 from pipi.domain.memory import MemoryType
@@ -47,6 +53,10 @@ class GrowthEngine:
         self.memory = memory                # MemoryManager（写里程碑记忆）
         self.clock = clock
         self.persona_like: list[str] = []   # 人格偏好词表（app 装配时注入）
+        # 关系唯一权威（Bond.trust）的读取器：由接入层注册
+        # （cli 装配 PULSE 后注入 lambda uid: rt.loop.bond.trust）。
+        # None → 阶段派生退化为"天数+里程碑"（S4 附加门槛不满足）。
+        self.trust_provider: Callable[[str], float | None] | None = None
 
     # ------------------------------------------------------------------
     # 装配读取
@@ -94,7 +104,7 @@ class GrowthEngine:
             gp = self.load(user_id)
 
             self._update_stats(gp, user_text, now)
-            self._update_stage(user_id, gp, emotion_state, now)
+            self._apply_derived_stage(user_id, gp, now)
             await self._check_milestones(user_id, gp, user_text, emotion_state, now)
             self._evolve_preferences(user_id, gp, user_text, emotion_state, now)
             self._learn_expressions(user_id, gp, user_text, now)
@@ -107,7 +117,10 @@ class GrowthEngine:
     # ------------------------------------------------------------------
 
     def snapshot(self, user_id: str, now: float | None = None) -> dict:
-        """成长面板数据（E1：经 WS 快照推送，web/monitor.html 消费）。"""
+        """成长面板数据（E1：经 WS 快照推送，web/monitor.html 消费）。
+
+        阶段为只读派生值（trust + 里程碑 + 天数），不读库写库。
+        """
         try:
             gp = self.load(user_id)
         except Exception as exc:
@@ -115,6 +128,7 @@ class GrowthEngine:
             return {"enabled": False}
         now = now if now is not None else self.clock.now()
         rel = self._rel_cfg()
+        gp.stage = self._derive_stage(user_id, gp, now)   # 派生阶段（内存）
         gap = gp.next_stage_gap(rel.get("stage_days", [0, 5, 30, 90]),
                                 rel.get("stage_milestones", [0, 1, 2, 3]),
                                 now)
@@ -148,53 +162,63 @@ class GrowthEngine:
         gp.stats = stats
 
     # ------------------------------------------------------------------
-    # 阶段机（硬性门槛，防速成）
+    # 阶段机（只读派生：trust + 里程碑 + 天数；引擎不再写关系列）
     # ------------------------------------------------------------------
 
-    def _update_stage(self, user_id: str, gp: GrowthProfile,
-                      emotion_state: Any, now: float) -> None:
+    def _trust(self, user_id: str) -> float | None:
+        """读关系唯一权威（Bond.trust）。无提供者/异常 → None（不满足 S4 门槛）。"""
+        if self.trust_provider is None:
+            return None
+        try:
+            t = self.trust_provider(user_id)
+        except Exception as exc:   # noqa: BLE001
+            logger.debug("trust 读取失败（按无提供者处理）：%s", exc)
+            return None
+        return None if t is None else float(t)
+
+    def _derive_stage(self, user_id: str, gp: GrowthProfile, now: float) -> int:
+        """派生 S1~S4：天数 + 里程碑硬门槛（不可跳跃），S4 附加 trust 门槛。
+
+        纯计算、不写库；回落规则（≥regress_days 不联系降一级，不低于 floor）
+        同样在派生层表达。缺 trust_provider 时 S4 附加门槛恒不满足。
+        """
         rel = self._rel_cfg()
         if not rel.get("enabled", True):
-            return
+            return gp.stage
         stage_days = rel.get("stage_days", [0, 5, 30, 90])
         stage_ms = rel.get("stage_milestones", [0, 1, 2, 3])
         floor = int(rel.get("regress_floor", 2))
-
         urow = self.repos.user.get(user_id) or {}
-        # 回落：≥30 天不联系降一级，但不低于 S2
         last_seen = float(urow.get("last_seen") or 0)
         quiet_days = (now - max(last_seen, gp.stage_since)) / _DAY
-        if gp.stage > floor and quiet_days >= float(rel.get("regress_days", 30)):
-            self._set_stage(user_id, gp, gp.stage - 1, now)
-            self.repos.growth.add_log(
-                user_id, "stage_change",
-                {"from": gp.stage + 1, "to": gp.stage, "reason": "久未联系"},
-                now)
-            return
-
-        # 推进：全部条件满足（不可跳跃，一次升一级）
-        if gp.stage < S4:
-            nxt = gp.stage + 1
+        stage = gp.stage
+        if stage > floor and quiet_days >= float(rel.get("regress_days", 30)):
+            stage = stage - 1
+        if stage < S4:
+            nxt = stage + 1
             ok_days = gp.active_days() >= int(stage_days[nxt])
             ok_ms = len(gp.milestones) >= int(stage_ms[nxt])
-            ok_aff = nxt != S4 or self._affection(user_id) >= float(
-                rel.get("min_affection_s4", 550))
-            if ok_days and ok_ms and ok_aff:
-                self._set_stage(user_id, gp, nxt, now)
-                self.repos.growth.add_log(
-                    user_id, "stage_change",
-                    {"from": nxt - 1, "to": nxt}, now)
+            trust = self._trust(user_id)
+            ok_s4 = nxt != S4 or (
+                trust is not None
+                and trust >= float(rel.get("min_trust_s4", 60)))
+            if ok_days and ok_ms and ok_s4:
+                stage = nxt
+        return stage
 
-    def _set_stage(self, user_id: str, gp: GrowthProfile, stage: int,
-                   now: float) -> None:
-        gp.stage = stage
-        gp.stage_since = now
-        self.repos.user.update(user_id, relationship_stage=stage,
-                               stage_since=now)
+    def _apply_derived_stage(self, user_id: str, gp: GrowthProfile,
+                             now: float) -> None:
+        """计算派生阶段：仅更新内存 gp.stage（供 plasticity/展示）+ 审计日志。
 
-    def _affection(self, user_id: str) -> float:
-        row = self.repos.user.get(user_id) or {}
-        return float(row.get("affection") or 500)
+        不写 users.relationship_stage（契约 §3：阶段无自有写者）。
+        """
+        derived = self._derive_stage(user_id, gp, now)
+        if derived != gp.stage:
+            self.repos.growth.add_log(
+                user_id, "stage_change",
+                {"from": gp.stage, "to": derived, "reason": "派生（trust+里程碑+天数）"},
+                now)
+            gp.stage = derived
 
     # ------------------------------------------------------------------
     # 里程碑（幂等：growth_milestones UNIQUE + 内存双保险）

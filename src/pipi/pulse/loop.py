@@ -134,6 +134,15 @@ class LivingLoop:
         self._diary.append({"kind": kind, "t": round(minute, 1), "text": text})
 
     # ------------------------------------------------------------- 事件注入
+    # 对话情绪 → 心境：唯一正式通道是 dialogue_mood 事件（契约
+    # docs/ENGINE_CONTRACTS.md §4.1）。映射常量在此显式声明、可审计，
+    # 不再由 runtime 隐式桥接（原 _MOOD_BASE 字典已删除）。
+    _MOOD_DELTA = {
+        "开心": +0.18, "得意": +0.16, "调皮": +0.15, "关心": +0.05,
+        "平静": 0.0, "困倦": -0.05, "傲娇": +0.02,
+        "吃醋": -0.10, "委屈": -0.14, "生气": -0.16,
+    }
+
     def inject(self, kind: str, minute: float | None = None, **kw) -> str:
         """统一事件入口。返回身体反应文本（供实时日志）。
 
@@ -142,6 +151,16 @@ class LivingLoop:
         """
         if minute is None:
             minute = (self.sim_seconds / MIN) % 1440.0
+        if kind == "dialogue_mood":
+            # 对话情绪（EmotionEngine 信号）→ 心境底色。显式语义规则：
+            # 正面→push_mood_base(+)、负面→push_mood_base(−)、平静/未知→无操作。
+            # 禁止写 Bond.trust / Tension / 意图（契约 §4.1）。
+            mood = str(kw.get("mood", "") or "").strip()
+            d = self._MOOD_DELTA.get(mood, 0.0)
+            if d:
+                self.push_mood_base(d)
+            self._note("dialogue_mood", minute, mood)
+            return "心情染上一点" + mood if d else ""
         if kind == "owner_depart":
             self.owner_present = False
             self.sep_min = 0.0

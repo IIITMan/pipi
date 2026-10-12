@@ -47,19 +47,6 @@ _VISION_MAP = {
     "owner_expression": "owner_sad",
 }
 
-# 对话情绪 → 心境底色微调。
-# 兼容两种入参：英文枚举名（HAPPY/SAD...）与 cli 实际回灌的中文 mood.value
-# （domain/emotion.py：开心/关心/吃醋/委屈/得意/傲娇/生气/困倦/调皮/平静）
-_MOOD_BASE = {
-    # 英文
-    "HAPPY": 0.18, "SAD": -0.18, "ANGRY": -0.12, "NEUTRAL": 0.0,
-    "EXCITED": 0.22, "TIRED": -0.08,
-    # 中文（Mood enum value）
-    "开心": 0.18, "得意": 0.16, "调皮": 0.15, "关心": 0.05,
-    "平静": 0.0, "困倦": -0.05, "傲娇": 0.02,
-    "吃醋": -0.10, "委屈": -0.14, "生气": -0.16,
-}
-
 
 class _PhysioCompat:
     """生理兼容门面（monitor 与 observe_dialogue_mood 读取当前身心数值）。"""
@@ -112,7 +99,10 @@ class PulseRuntime:
         self.tick_s = float(p_cfg.get("tick_s", 1.0))
         self.vocal_cooldown_s = float(p_cfg.get("vocal_cooldown_s", 90.0))
         self.vocal_prob = float(p_cfg.get("vocal_prob", 0.008))
-        self.diary_memory = bool(p_cfg.get("diary_memory", False))
+        # 日记→记忆库开关：唯一正式入口 set_diary_memory()（契约 §5.1），
+        # 构造时由 config.pulse.diary_memory 初始化。
+        self.diary_memory = False
+        self.set_diary_memory(bool(p_cfg.get("diary_memory", False)))
 
         self._running = False
         self._tasks: list[asyncio.Task] = []
@@ -261,6 +251,14 @@ class PulseRuntime:
         self._last_event_logged = now
         self._inject("user_voice", {"dur": 5.0})
 
+    def set_diary_memory(self, enabled: bool) -> None:
+        """日记→记忆库开关（契约 ENGINE_CONTRACTS §5.1 唯一正式入口）。
+
+        true：跨天 consolidate_night() 叙事经 _commit_diary 单通道写入
+        MemoryManager（长期检索）；false：叙事只留在事件流（监控可见）。
+        """
+        self.diary_memory = bool(enabled)
+
     def on_barge_in(self) -> None:
         """被主人打断：意图挂起 + 委屈波澜（下一次 Will 重试/放弃）；夜间保持清醒。"""
         self.loop.will.interrupt()
@@ -281,14 +279,15 @@ class PulseRuntime:
         self._event_log("farewell", "对话结束，回待机")
 
     def observe_dialogue_mood(self, mood: str) -> None:
-        """对话情绪回灌心境（旧 physio.observe_dialogue_mood 兼容）。"""
-        key = (mood or "平静").strip()
-        d = _MOOD_BASE.get(key, _MOOD_BASE.get(key.upper(), 0.0))
-        if d:
-            self.loop.push_mood_base(d)
+        """对话情绪回灌心境（EmotionEngine 信号 → 正式 dialogue_mood 事件）。
+
+        契约 docs/ENGINE_CONTRACTS.md §4.1：心境唯一权威是 LivingLoop，
+        此方法只做"信号 → 事件注入"，不再维护任何隐式映射表。
+        """
+        self._inject("dialogue_mood", {"mood": mood})
         self.loop.bond.interact()
         # 留痕最近对话情绪（监控"心情"可见，60s 后回落）
-        self._last_chat_mood = key
+        self._last_chat_mood = (mood or "平静").strip()
         self._last_chat_mood_t = self._mono()
 
     # ------------------------------------------------------------------
