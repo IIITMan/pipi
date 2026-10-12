@@ -301,6 +301,7 @@ class InteractionSession:
         self.kws = make_kws(cfg)
 
         self.state = self.IDLE
+        self._quiet = False                # 控制车道：/quiet 静音门（契约 §6.1）
         self.last_asr_ms = 0
         self.last_utt_s = 0.0
         self._aq: asyncio.Queue | None = None
@@ -356,13 +357,32 @@ class InteractionSession:
         """会话是否忙（对话/机器人说话/正在收集用户语音）。"""
         return self.state != self.IDLE or self._seg_active
 
+    @property
+    def is_quiet(self) -> bool:
+        """控制车道静音门（/quiet）：静音期间所有自发/预警/主动发声被抑制。
+
+        契约 ENGINE_CONTRACTS §6.1：控制直达路径不经 orchestrator/LLM。
+        """
+        return self._quiet
+
+    def set_quiet(self, enabled: bool) -> None:
+        """打开/关闭静音门。打开时同时终止当前播放（已取消不自动恢复）。"""
+        self._quiet = bool(enabled)
+        if enabled:
+            abort = getattr(self.tts, "abort", None)
+            if abort is not None:
+                try:
+                    abort()
+                except Exception:
+                    pass
+
     # ------------------------------------------------------------------
     # 生命模块接入：自发念头发声（走现有 TTS + Barge-in 通道）
     # ------------------------------------------------------------------
 
     def try_speak_spontaneous(self, text: str) -> bool:
         """空闲时让皮皮说一句自发念头。返回 False 表示此刻不方便。"""
-        if self.state != self.IDLE or self._seg_active:
+        if self.state != self.IDLE or self._seg_active or self._quiet:
             return False
         self.state = self.RESPOND
         self._resp_started = time.monotonic()

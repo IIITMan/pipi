@@ -227,6 +227,17 @@ class ConversationOrchestrator:
         start, now, ctx, session, profile = self._prepare_context(
             user_id, user_text, transcript=transcript, vision=vision)
 
+        # 吃醋触发器学习开关（契约 ENGINE_CONTRACTS §5.5）：用户明确表示
+        # 不喜欢吃醋反应 → 永久关闭（写 profile.extra，本回合即生效）。
+        if profile is not None and not (
+                profile.extra or {}).get("rival_trigger_disabled", False):
+            if self.emotion_analyst.engine.check_rival_opt_out(user_text):
+                profile.extra["rival_trigger_disabled"] = True
+                try:
+                    self.profile_repo.save(profile, now)
+                except Exception as exc:
+                    logger.debug("吃醋开关持久化失败（本回合仍生效）：%s", exc)
+
         # 环境档案（贾维斯化③）：顺带记下提到的地点/物品/家人（永不阻塞）
         if self.env is not None:
             try:
@@ -315,6 +326,16 @@ class ConversationOrchestrator:
 
         start, now, ctx, session, profile = self._prepare_context(
             user_id, user_text, transcript=transcript, vision=vision)
+
+        # 吃醋触发器学习开关（契约 ENGINE_CONTRACTS §5.5，同 handle_turn）
+        if profile is not None and not (
+                profile.extra or {}).get("rival_trigger_disabled", False):
+            if self.emotion_analyst.engine.check_rival_opt_out(user_text):
+                profile.extra["rival_trigger_disabled"] = True
+                try:
+                    self.profile_repo.save(profile, now)
+                except Exception as exc:
+                    logger.debug("吃醋开关持久化失败（本回合仍生效）：%s", exc)
 
         # 环境档案（贾维斯化③）：顺带记下提到的地点/物品/家人（永不阻塞）
         if self.env is not None:

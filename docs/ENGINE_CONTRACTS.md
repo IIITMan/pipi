@@ -116,16 +116,39 @@ MemoryManager ◀──（日记单通道 _commit_diary）── River.consolida
 `PulseRuntime._commit_diary()`（MemoryType.EVENT, importance 0.55）→ MemoryManager.commit。
 `diary_memory=false` 时通道关闭，叙事只存在于事件流（监控可见）。
 
-## 6. 后续阶段（已批准计划，未实施）
+### 5.4 产品约束：情绪推断伦理护栏（MUST，阶段 2 已落地）
 
-### 6.1 阶段 2：控制车道独立 + 情绪推断伦理护栏
+**绝不从用户的沉默、离开、拒绝互动推断"冷落/难过/需要安慰"。**
+机器人可以对缺失反应作出行为性回应（更安静、降低主动频率、减少打扰），
+但**不得**把缺失反应量化为委屈、伤心、被冷落等负面情绪状态，也不得在
+回复中输出此类归因。
 
-- 停/静音/取消走不经过 orchestrator/LLM 的独立通道；用户说话时主动让路、播放中可取消、已取消不自动恢复。
-- 重设 `MOOD_TRANSITIONS` 推断规则：`idle`/`ignored` 走降频通道（更安静而非更委屈）；
-  `mention_rival` 保留（显式语义）但增加"用户明确不喜欢 → 永久关闭该触发器"学习开关。
-- 验收：连续 3 次被忽视后更安静而非更委屈；`/quiet` 期间 LLM 不可唤醒主动发言。
+| 情境 | 允许 | 禁止 |
+|---|---|---|
+| 长时间未交互（idle） | `MOOD_TRANSITIONS["idle"]`→CALM；陪伴需求累积（need_delta=+0.15）；主动搭话上限减半（沉默 ≥ 2×idle_hours） | target=AFFECTED（委屈）、affection_delta<0 |
+| 主动搭话被忽视（ignored） | `MOOD_TRANSITIONS["ignored"]`→CALM；`note_ignored()` 降频（≥2 次减半、≥3 次归零）；自发发声 10min 无回应 → 运行时降频 | target=AFFECTED、need/affection 惩罚 |
+| 用户提到竞争对象（mention_rival） | **保留**吃醋反应（用户显式输入的语义，非推断） | 无 |
+| 用户明确表示不喜欢吃醋反应 | 学习开关置位（`profile.extra.rival_trigger_disabled`）→ 永久关闭 mention_rival 触发器（不再扣好感、不进入吃醋，仅保持平静） | 继续吃醋 |
+| 控制车道静音（/quiet） | 所有主动/自发/预警发声被抑制；当前播放立即终止；`/resume` 恢复 | LLM 渲染或 orchestrator 唤醒任何主动发言 |
 
-### 6.2 阶段 3：LLM 边界与确定性回放
+## 6. 后续阶段
+
+### 6.1 阶段 2：控制车道独立 + 情绪推断伦理护栏（**已落地**，提交后见 git log）
+
+- 控制直达路径：`/quiet`（静音）/`/resume`/`/stop`（停止当前播放）在 CLI
+  命令层直接处理，**不经 orchestrator/LLM**；静音门 `session.is_quiet` 在
+  发声出口（`try_speak_spontaneous`）与 PULSE 发声入口
+  （`_maybe_vocal`/`_speak_alert`/`_render_and_speak`）双重生效，静音期间
+  LLM 渲染也不会被调用；`speaker.abort()` 终止播放，已取消不自动恢复。
+- `MOOD_TRANSITIONS` 重设：`idle`/`ignored` → CALM（见 §5.4），委屈不再由
+  沉默/被忽视产生；`mention_rival` 保留 + 学习开关（`check_rival_opt_out`
+  识别"别吃醋/不喜欢这样"等 → `profile.extra.rival_trigger_disabled`）。
+- 被忽视降频运行时接通：自发发声 10 分钟无任何回应 → `set_ignored_observer`
+  回调 → `proactive_engine.note_ignored()`（上限减半/归零）。
+- 验收：连续 3 次被忽视后更安静而非更委屈（ignored_streak≥3 → 上限 0）；
+  `/quiet` 期间 LLM 不可唤醒任何主动发言；48/48 + 34/34 + 14/14 回归不变。
+
+### 6.2 阶段 3：LLM 边界与确定性回放（已批准计划，未实施）
 
 - 对话回复（长度/结构）与记忆抽取（JSON）输出过 schema 校验，非法即弃 + 有界重试。
 - "分类不授权"：LLM/规则意图分类必须过 capability allowlist 与安全检查才执行。

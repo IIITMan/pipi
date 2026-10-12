@@ -114,6 +114,10 @@ class PulseRuntime:
         self._last_thought_desc = ""
         self._activity_desc = ""
         self._last_event_logged: float = 0.0   # user_voice 节流
+        # 被忽视降频的运行时接通（契约 §6.1）：自发发声后长时间无任何
+        # 用户回应 → 通知编排侧降频（note_ignored），由 cli 注入回调。
+        self._ignored_observer: Callable[[], None] | None = None
+        self._ignored_flagged = False
         # 身体/行为（每帧缓存 → 监控展示；硬件端口 action_sink 预留）
         self._body_state: dict = {"lamp": 0.0, "eye": "正常",
                                   "pose": "松弛", "act": ""}
@@ -249,7 +253,16 @@ class PulseRuntime:
         if now - self._last_event_logged < 1.0:
             return
         self._last_event_logged = now
+        self._ignored_flagged = False          # 有回应：解除"被忽视"标记
         self._inject("user_voice", {"dur": 5.0})
+
+    def set_ignored_observer(self, fn: Callable[[], None] | None) -> None:
+        """注册被忽视降频回调（cli 注入 proactive_engine.note_ignored）。
+
+        契约 ENGINE_CONTRACTS §6.1：自发发声后长时间无回应 → 通知编排侧
+        降频（上限减半/归零），皮皮更安静而非更委屈。
+        """
+        self._ignored_observer = fn
 
     def set_diary_memory(self, enabled: bool) -> None:
         """日记→记忆库开关（契约 ENGINE_CONTRACTS §5.1 唯一正式入口）。
@@ -444,6 +457,8 @@ class PulseRuntime:
         self._event_log(kind, fallback)      # 预警触发本身留痕（监控可见）
         if self.session is None or getattr(self.session, "is_busy", False):
             return
+        if getattr(self.session, "is_quiet", False):
+            return        # 控制车道静音门（§6.1）
         hour = self.clock.now_hour()
         if self.loop.is_sleeping(hour):
             return
@@ -568,7 +583,19 @@ class PulseRuntime:
             return
         if self.session is None or getattr(self.session, "is_busy", False):
             return
+        if getattr(self.session, "is_quiet", False):
+            return        # 控制车道静音门：静音期间不唤醒任何主动发言（§6.1）
         now = self._mono()
+        # 被忽视降频（运行时接通）：自发发声 10 分钟后仍无任何回应
+        # → 上报编排侧降频（note_ignored），让皮皮更安静而非更委屈。
+        if self._last_vocal and now - self._last_vocal >= 600:
+            if not self._ignored_flagged and now - self._last_event_logged >= 600:
+                self._ignored_flagged = True
+                if self._ignored_observer is not None:
+                    try:
+                        self._ignored_observer()
+                    except Exception as exc:
+                        logger.debug("被忽视降频回调失败：%s", exc)
         if now - self._last_vocal < self.vocal_cooldown_s:
             return
         intent = snap.get("intent")
@@ -592,6 +619,8 @@ class PulseRuntime:
 
     async def _render_and_speak(self, kind: str, fallback: str) -> None:
         """统一说话：优先 LLM 按内心状态渲染；失败/无渲染器 → 固定句库。"""
+        if getattr(self.session, "is_quiet", False):
+            return        # 控制车道静音门（§6.1）：LLM 渲染也不执行
         text = fallback
         if self.vocal_renderer is not None:
             try:

@@ -41,7 +41,12 @@ class EmotionAnalyst(BaseAgent):
 
         # 融合更新情绪状态
         if ctx.emotion_state is not None:
-            updated, trigger = self.engine.update(ctx.emotion_state, signals, ctx.now)
+            # 吃醋触发器学习开关（契约 ENGINE_CONTRACTS §5.5）：
+            # 用户明确表示不喜欢 → 永久关闭，不再进入吃醋反应。
+            extra = getattr(getattr(ctx, "profile", None), "extra", None) or {}
+            rival_off = bool(extra.get("rival_trigger_disabled", False))
+            updated, trigger = self.engine.update(
+                ctx.emotion_state, signals, ctx.now, rival_disabled=rival_off)
             ctx.emotion_state = updated
         else:
             trigger = "no_state"

@@ -37,6 +37,13 @@ POSITIVE_WORDS = [
 PRAISE_WORDS = ["喜欢你", "爱你", "想你", "好棒", "厉害", "谢谢", "好可爱", "真聪明"]
 RIVAL_WORDS = ["猫", "狗", "别的机器人", "小爱", "天猫精灵", "chatgpt",
                "小度", "小艺", "siri", "别的助手"]
+# 吃醋触发器的学习开关（产品约束 ENGINE_CONTRACTS §5.5）：
+# mention_rival 是用户显式输入的语义（保留），但用户明确表示不喜欢这种反应时
+# → 永久关闭该触发器。以下为"明确不喜欢"的识别规则（限短句、负面明确）。
+RIVAL_OPT_OUT_PATTERNS = [
+    "别吃醋", "不吃醋", "不喜欢你吃醋", "不要吃醋", "别这样", "别闹",
+    "不喜欢这样", "别瞎吃醋", "吃醋不", "不喜欢你这样",
+]
 
 
 @dataclass
@@ -145,8 +152,13 @@ class EmotionEngine:
     # ------------------------------------------------------------------
 
     def update(self, state: EmotionState, signals: list[EmotionSignal],
-               now: float) -> tuple[EmotionState, str]:
-        """综合多个信号，更新情绪状态。返回 (新状态, 触发原因)。"""
+               now: float, *, rival_disabled: bool = False
+               ) -> tuple[EmotionState, str]:
+        """综合多个信号，更新情绪状态。返回 (新状态, 触发原因)。
+
+        rival_disabled：吃醋触发器学习开关（用户明确表示不喜欢后永久关闭，
+        契约 ENGINE_CONTRACTS §5.5）——关闭时 mention_rival 不再生效。
+        """
         state.last_interaction = now
         state.updated_at = now
 
@@ -165,11 +177,15 @@ class EmotionEngine:
         praise_sig = next((s for s in valid if s.is_praise), None)
         neg_sig = next((s for s in valid if s.is_negative), None)
 
-        if rival_sig:
+        if rival_sig and not rival_disabled:
             state.apply_by_key("mention_rival")
             # 用 persona 的吃醋幅度覆盖默认值
             state.affection += (self.persona.jealousy_affection_delta + 5.0)
             trigger = "mention_rival"
+        elif rival_sig:
+            # 学习开关已关闭：不进入吃醋，保持平静（显式输入仍在，仅不反应）
+            state.cool_down()
+            trigger = "rival_disabled"
         elif praise_sig:
             state.apply_by_key("praise")
             state.affection += (self.persona.praise_affection_delta - 5.0)
@@ -275,3 +291,13 @@ class EmotionEngine:
     def needs_comfort(self, signals: list[EmotionSignal]) -> bool:
         """是否需要先安抚情绪（编排层据此调整回复策略）。"""
         return any(s.needs_comfort for s in signals if s)
+
+    def check_rival_opt_out(self, text: str) -> bool:
+        """用户是否明确表示不喜欢吃醋反应（学习开关置位条件）。
+
+        产品约束 ENGINE_CONTRACTS §5.5：吃醋是显式语义（保留），
+        但用户明确表达不喜欢 → 置位后永久关闭该触发器。
+        """
+        if not text:
+            return False
+        return any(p in text for p in RIVAL_OPT_OUT_PATTERNS)

@@ -79,11 +79,13 @@ MOOD_TRANSITIONS: dict[str, EmotionTransition] = {
         need_delta=-0.10,
     ),
     # 长时间没有交互（每小时累积，由 decay pass 触发）
+    # 产品约束（ENGINE_CONTRACTS §5.5）：沉默不推断委屈/冷落——
+    # 只累积陪伴需求，情绪保持平静，主动降频由 proactive 引擎负责。
     "idle": EmotionTransition(
-        trigger="长时间未交互",
-        target=Mood.AFFECTED,
-        intensity=0.6,
-        affection_delta=-3.0,
+        trigger="长时间未交互（安静等待，不推断委屈）",
+        target=Mood.CALM,
+        intensity=0.3,
+        affection_delta=0.0,
         need_delta=0.15,
     ),
     # 视觉：主人回家
@@ -127,12 +129,14 @@ MOOD_TRANSITIONS: dict[str, EmotionTransition] = {
         need_delta=0.05,
     ),
     # 用户忽视主动搭话（连续未回应）
+    # 产品约束（ENGINE_CONTRACTS §5.5）：被忽视不累计委屈——情绪保持平静，
+    # 降频（上限减半/归零）由 proactive 引擎的 ignored_streak 负责。
     "ignored": EmotionTransition(
-        trigger="主动搭话被忽视",
-        target=Mood.AFFECTED,
-        intensity=0.5,
-        affection_delta=-2.0,
-        need_delta=0.10,
+        trigger="主动搭话被忽视（降频而非委屈）",
+        target=Mood.CALM,
+        intensity=0.3,
+        affection_delta=0.0,
+        need_delta=0.0,
     ),
 }
 

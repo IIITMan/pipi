@@ -150,6 +150,13 @@ class ProactiveEngine:
         # ---- 2. 每日上限 ----
         used = self.repo.count_today(user_id, self._day_start())
         limit = self.effective_daily_limit()
+        # 沉默降频（产品约束 ENGINE_CONTRACTS §5.5）：长时间无互动时，
+        # 寂寞不该变骚扰——上限再减半（与"被忽视降频"独立可叠加）。
+        ref_t = last_user_message_at or state.last_interaction
+        if limit > 0 and ref_t:
+            silent_h = (now - ref_t) / 3600.0
+            if silent_h >= self.effective_idle_hours * 2:
+                limit = max(1, limit // 2)
         if used >= limit:
             return ProactiveDecision(
                 False, suppressed_by=f"今日已达上限 {used}/{limit}"
@@ -198,7 +205,8 @@ class ProactiveEngine:
                 candidates.append((
                     self.rules["idle"].priority,
                     "idle",
-                    f"主人已经 {hours:.0f} 小时没理你了，你有点想他，也有点小委屈",
+                    f"主人已经 {hours:.0f} 小时没理你了，你有点想他，"
+                    "安安静静地等着",
                 ))
 
         # 早间问候

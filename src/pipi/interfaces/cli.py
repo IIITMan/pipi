@@ -287,6 +287,10 @@ class CLI:
                 return res.bubbles[0].text or None
             return getattr(res, "text", None) or None
         rt.vocal_renderer = _render_vocal
+        # 被忽视降频接通（契约 §6.1）：自发发声后 10 分钟无回应 → 编排侧
+        # note_ignored（上限减半/归零）——皮皮更安静而非更委屈。
+        rt.set_ignored_observer(
+            lambda: self.app.proactive_engine.note_ignored())
         return rt
 
     # ------------------------------------------------------------------
@@ -650,6 +654,23 @@ class CLI:
 
         elif name == "/privacy":
             self._privacy()
+
+        elif name in ("/quiet", "/mute"):
+            # 控制车道（契约 ENGINE_CONTRACTS §6.1）：静音直达，不经
+            # orchestrator/LLM。静音期间自发/预警/主动发言全部抑制，
+            # 当前播放立即终止（已取消不自动恢复）。
+            self._session.set_quiet(True)
+            self._speaker.abort()
+            print("  已静音：皮皮不说话，直到 /resume 恢复")
+
+        elif name in ("/resume", "/unmute"):
+            self._session.set_quiet(False)
+            print("  已恢复发声")
+
+        elif name == "/stop":
+            # 控制车道：立即停止当前播放与生成（不自动恢复）。
+            self._speaker.abort()
+            print("  已停止当前播放")
 
         else:
             print(f"  未知命令：{cmd}")
