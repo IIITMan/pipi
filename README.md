@@ -377,6 +377,7 @@ MIT
 | [`docs/PULSE_RUNTIME_INTEGRATION.md`](docs/PULSE_RUNTIME_INTEGRATION.md) | PULSE 真实系统接入说明（配置/事件映射/监控） |
 | [`docs/PULSE_VALIDATION_REPORT.md`](docs/PULSE_VALIDATION_REPORT.md) | PULSE P0–P4 验证总报告 |
 | [`docs/ENGINE_CONTRACTS.md`](docs/ENGINE_CONTRACTS.md) | 状态契约：唯一权威写入者 / 事件契约 / 日记与记忆分层（阶段 1 已落地） |
+| [`docs/VALIDATION_MATRIX.md`](docs/VALIDATION_MATRIX.md) | 验证证据总矩阵：全部验收脚本/断言数/结果/关联提交 |
 | [`docs/GROWTH_DESIGN.md`](docs/GROWTH_DESIGN.md) | 成长系统设计（关系阶段/里程碑/偏好演化） |
 | [`docs/HARDWARE.md`](docs/HARDWARE.md) | 硬件选型、BOM、三档预算方案 |
 | [`docs/CHASSIS.md`](docs/CHASSIS.md) | 麦轮底盘机械设计（含自动回充与充电桩） |

@@ -60,8 +60,8 @@ def main():
     uid = f"rem_test{stamp}"
     app.repos.user.ensure(uid, time.time())
 
-    clk = FakeClock(time.time())
-    svc.clock = clk   # 注入可控时钟
+    clk = FakeClock(ts_morning(12))   # 今天 12:00：避开静默窗口 [23,7]
+    svc.clock = clk   # 注入可控时钟（基准用真实日历，时刻取窗口外）
 
     # ---- 意图解析：创建提醒（5 分钟后）----
     handled, reply = svc.try_parse(uid, "提醒我 5 分钟后喝水")
