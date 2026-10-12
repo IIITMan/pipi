@@ -34,6 +34,10 @@ from typing import Any, Callable
 
 from pipi.agents.base import AgentContext
 from pipi.agents.dialogue_expert import DialogueExpert, ToolCallSignal
+
+# 工具执行 allowlist（契约 §7.2 "分类不授权"）：LLM/规则产出任意工具意图
+# 分类，只有落在此集合内且通过安全检查才执行；集合外一律拒绝。
+TOOL_ALLOWLIST = frozenset({"weather", "search", "vision"})
 from pipi.agents.emotion_analyst import EmotionAnalyst
 from pipi.agents.memory_expert import MemoryExpert
 from pipi.capabilities.expression import PostProcessResult, postprocess, to_bubbles
@@ -275,7 +279,15 @@ class ConversationOrchestrator:
                     degraded = attempt > 0
                     raw_text = self._fallback_reply(gen_res.error)
                 else:
-                    raw_text = gen_res.data.text
+                    # 输出校验（契约 §7.1）：空/超长 → 有界重试 1 次 → 仍非法
+                    # 则降级兜底；畸形输出绝不直接进气泡。
+                    raw_text, bad = self._validate_reply(
+                        gen_res.data.text, self._max_reply_chars())
+                    if bad and attempt < start_round + 1:
+                        continue          # 有界重试（最多 1 次）
+                    if bad:
+                        degraded = True
+                        raw_text = self._fallback_reply("非法回复输出")
                 break
             except ToolCallSignal as sig:
                 await self._run_tool(sig, ctx, vision, user_text, on_notice)
@@ -425,7 +437,17 @@ class ConversationOrchestrator:
 
     async def _run_tool(self, sig: ToolCallSignal, ctx, vision_obs,
                         user_text: str, on_notice) -> None:
-        """执行 LLM 请求的工具，结果注入 ctx.tool_brief / vision.raw。"""
+        """执行 LLM 请求的工具，结果注入 ctx.tool_brief / vision.raw。
+
+        契约 ENGINE_CONTRACTS §7.2（"分类不授权"）：LLM/规则产出的意图
+        分类**本身不是执行许可**——必须过引擎侧 capability allowlist 与
+        安全检查后才执行。allowlist 之外的工具一律拒绝。
+        """
+        if sig.tool not in TOOL_ALLOWLIST:
+            logger.warning("拒绝越权工具调用：%s（不在 allowlist）", sig.tool)
+            ctx.tool_brief = ("（内部提示：该请求不被允许，"
+                              "直接以你的口吻正常回答，不提工具）")
+            return
         tool, query = sig.tool, sig.query
         intent_cn = {"weather": "想查天气", "search": "想查资料",
                      "vision": "想看看眼前"}[tool]
@@ -597,7 +619,11 @@ class ConversationOrchestrator:
                              persist: bool, now: float,
                              profile: UserProfile) -> TurnResult:
         """回合收尾：后处理/气泡/动作/会话记录/异步持久化。"""
-        raw_text = self._strip_reasoning(raw_text)
+        # 输出校验（契约 §7.1）：剥推理块 + 空/超长截断，畸形输出标记降级。
+        # 流式路径已流出无法重试，在此做最终净化；非流式路径已校验过（幂等）。
+        raw_text, truncated = self._validate_reply(
+            raw_text, self._max_reply_chars())
+        degraded = degraded or truncated
         pp: PostProcessResult = postprocess(raw_text, self.persona.speech_style)
         voice_emotion = "neutral"
         if self.enable_proactive_emotion and ctx.emotion_state:
@@ -793,6 +819,26 @@ class ConversationOrchestrator:
         """LLM 失败时的兜底话术 —— 保证皮皮不沉默。"""
         logger.warning("走兜底回复（原因：%s）", error)
         return "……我刚走神了。你再说一遍？"
+
+    def _max_reply_chars(self) -> int:
+        """回复长度上限（字符）。由 persona.max_tokens（token 预算）推导。"""
+        max_tokens = self.persona.max_tokens if self.persona else 150
+        return int(max_tokens * 1.6) + 40
+
+    def _validate_reply(self, text: str, max_chars: int) -> tuple[str, bool]:
+        """对话输出校验（契约 ENGINE_CONTRACTS §7.1，LLM_OUTPUT_CONTRACT）。
+
+        剥推理块与意图标签 → 空输出判非法 → 超长截断并标记降级。
+        返回 (净化后的文本, 是否降级)。畸形输出绝不直接进气泡。
+        """
+        text = self._strip_reasoning(text or "")
+        text = (text or "").strip()
+        if not text:
+            return "", True
+        if len(text) > max_chars:
+            logger.warning("回复超长（%d > %d 字符），截断", len(text), max_chars)
+            return text[:max_chars].rstrip(), True
+        return text, False
 
     def _fallback_proactive(self, event: str) -> str:
         return "喂……你在吗"

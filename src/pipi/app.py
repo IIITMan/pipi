@@ -335,13 +335,16 @@ def _build_optional_providers(cfg: Config, app_ctx: dict, sim: bool,
 
 
 def build_app(cfg: Config | None = None, *, sim: bool = False,
-              clock: Clock | None = None) -> App:
+              clock: Clock | None = None,
+              llm_override: Any | None = None) -> App:
     """装配应用。
 
     Args:
         cfg: 配置，None 时加载默认配置
         sim: 模拟模式（全 mock，零依赖）
         clock: 可注入时钟（测试用）
+        llm_override: 注入 LLM Provider（确定性回放/测试用 fixture LLM，
+            契约 ENGINE_CONTRACTS §7.3）；None 时走 build_llm 正常装配
     """
     cfg = cfg or Config.default()
     now = (clock or SystemClock()).now()
@@ -368,6 +371,8 @@ def build_app(cfg: Config | None = None, *, sim: bool = False,
 
     # LLM
     llm = build_llm(cfg, sim)
+    if llm_override is not None:
+        llm = llm_override          # fixture LLM：确定性回放/测试注入
 
     # 向量 + 记忆
     embedder = create_embedder(

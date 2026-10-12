@@ -148,9 +148,50 @@ MemoryManager ◀──（日记单通道 _commit_diary）── River.consolida
 - 验收：连续 3 次被忽视后更安静而非更委屈（ignored_streak≥3 → 上限 0）；
   `/quiet` 期间 LLM 不可唤醒任何主动发言；48/48 + 34/34 + 14/14 回归不变。
 
-### 6.2 阶段 3：LLM 边界与确定性回放（已批准计划，未实施）
+### 6.2 阶段 3：LLM 边界与确定性回放（**已落地**，详见 §7）
 
-- 对话回复（长度/结构）与记忆抽取（JSON）输出过 schema 校验，非法即弃 + 有界重试。
-- "分类不授权"：LLM/规则意图分类必须过 capability allowlist 与安全检查才执行。
-- 目的化上下文视图：记忆抽取/情感分析/对话生成各自使用最小必要视图。
-- `replay_session.py` 支持注入 fixture LLM，Prompt 改动回归完全确定性。
+## 7. LLM 输出契约（阶段 3 已落地）
+
+### 7.1 输出 schema 校验（LLM_OUTPUT_CONTRACT）
+
+**对话回复**（`orchestrator._validate_reply`）：
+- 剥推理块与意图标签 → 空输出判非法 → 超长截断（上限由
+  `persona.max_tokens×1.6+40` 字符推导）并标记降级；
+- 非流式路径：非法输出**有界重试 1 次**，仍非法 → 兜底话术，畸形输出
+  绝不直接进气泡；流式路径已流出不可重试，在收尾做最终净化。
+
+**记忆抽取**（`MemoryManager._extract_with_llm` + `_sanitize_memory_item`）：
+- 逐项 schema 校验：`type` ∈ MemoryType（非法回退 CHITCHAT）、
+  `content` 非空且 ≤200 字、`importance` 数值化并 clamp [0,1]、
+  `pinned` 布尔化——非法项即弃；
+- 解析失败或全部项非法 → 有界重试 1 次 → 仍无有效项 → 返回空结果，
+  **不落库**（调用方走规则抽取兜底）。
+
+### 7.2 "分类不授权"（capability allowlist）
+
+LLM/规则产出的工具意图分类**本身不是执行许可**。`TOOL_ALLOWLIST =
+{weather, search, vision}`（`orchestrator.py` 模块级常量）；`_run_tool`
+入口校验：allowlist 外工具一律拒绝（记日志 + 注入"该请求不被允许"提示，
+LLM 以正常口吻回答，不暴露内部机制）。工具执行有超时与 query 长度
+（≤80 字符，`_TOOL_RE` 限制）双重保护。
+
+### 7.3 目的化上下文视图（最小必要视图）
+
+| 消费方 | 注入视图 | 边界 |
+|---|---|---|
+| 对话生成（dialogue_expert） | history（`context_messages`，max_context_turns=20 截断）+ 记忆 top_k=5 + `inner_brief` 简述（非完整 PULSE 状态）+ 情绪一行摘要 | 不注入完整状态/事件流 |
+| 情感分析（emotion_analyst） | 仅文本/语音/视觉三路信号 | 不注入记忆/历史/档案 |
+| 记忆抽取（memory_manager） | 仅 user_text + reply_text | 不注入历史/档案 |
+| 记忆检索（memory_expert） | user_text + top_k 排序 | 不注入全量库 |
+
+省 token + 缩小隐私暴露面：每轮最小视图替代全量重注入。
+
+### 7.4 确定性回放（fixture LLM）
+
+- `build_app(cfg, sim=True, llm_override=FixtureLLM())` 注入固定 LLM
+  （`scripts/replay_session.py --fixture`）；
+- FixtureLLM：`chat/stream` 返回固定台词、`complete` 返回固定记忆 JSON，
+  不依赖真实 API 与网络；
+- 同一批输入回放两遍，对比输出（除 latency_ms 外）逐字节一致
+  ——Prompt 改动回归完全确定性。
+- 验收：LLM 返回畸形 JSON 时不落库不执行；同一会话回放两次逐字节一致。

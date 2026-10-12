@@ -223,7 +223,13 @@ class MemoryManager:
         return self._score_and_finalize(result, user_text, emotion_intensity)
 
     async def _extract_with_llm(self, user_text: str, reply_text: str) -> ExtractResult:
-        """用便宜模型抽取。返回结构化 JSON。"""
+        """用便宜模型抽取。返回结构化 JSON。
+
+        契约 ENGINE_CONTRACTS §7.1（LLM_OUTPUT_CONTRACT）：
+        - 逐项 schema 校验（type/content/importance/pinned），非法项即弃
+        - 解析失败或全部项非法 → 有界重试 1 次
+        - 重试后仍无有效项 → 返回空结果（**不落库**，调用方走规则兜底）
+        """
         from pipi.prompts import render  # 延迟导入避免循环
 
         prompt = render(
@@ -231,26 +237,54 @@ class MemoryManager:
             user_text=user_text,
             reply_text=reply_text,
         )
-        raw = await self.llm.complete(prompt, use_cheap=True, max_tokens=400)
-        data = _parse_json_array(raw)
+        for attempt in range(2):   # 有界重试：畸形 JSON 再试一次
+            if attempt > 0:
+                prompt = (prompt + "\n\n注意：上一次输出无法解析。"
+                          "只输出一个 JSON 数组，每项必须含 content 字段。")
+            raw = await self.llm.complete(prompt, use_cheap=True, max_tokens=400)
+            data = _parse_json_array(raw)
 
-        result = ExtractResult(method="llm")
-        for d in data:
-            try:
-                mtype = MemoryType(d.get("type", "chitchat"))
-            except ValueError:
-                mtype = MemoryType.CHITCHAT
-            content = str(d.get("content", "")).strip()
-            if not content:
-                continue
-            result.candidates.append(MemoryCandidate(
-                type=mtype,
-                content=content,
-                importance=float(d.get("importance", 0.5)),
-                pinned=bool(d.get("pinned", False)),
-                meta={"hint": d.get("hint", "")},
-            ))
-        return result
+            result = ExtractResult(method="llm")
+            for d in data:
+                if not isinstance(d, dict):
+                    continue
+                item = self._sanitize_memory_item(d)
+                if item is not None:
+                    result.candidates.append(item)
+            if result.candidates:
+                return result
+            logger.warning("LLM 记忆抽取无效（attempt %d：解析 %d 项全非法）",
+                           attempt, len(data))
+        return result   # 仍无有效项：不落库
+
+    @staticmethod
+    def _sanitize_memory_item(d: dict) -> MemoryCandidate | None:
+        """记忆抽取项 schema 校验（契约 §7.1）：非法即弃。
+
+        - type ∈ MemoryType（非法回退 CHITCHAT）
+        - content 非空且 ≤200 字符
+        - importance 数值化并 clamp 到 [0,1]（"high"/None 等非法值归 0.5）
+        - pinned 布尔化
+        """
+        try:
+            mtype = MemoryType(d.get("type", "chitchat"))
+        except ValueError:
+            mtype = MemoryType.CHITCHAT
+        content = str(d.get("content", "")).strip()
+        if not content or len(content) > 200:
+            return None
+        try:
+            importance = float(d.get("importance", 0.5))
+        except (TypeError, ValueError):
+            importance = 0.5
+        importance = max(0.0, min(1.0, importance))
+        return MemoryCandidate(
+            type=mtype,
+            content=content,
+            importance=importance,
+            pinned=bool(d.get("pinned", False)),
+            meta={"hint": str(d.get("hint", ""))},
+        )
 
     def _extract_with_rules(self, text: str, emotion_intensity: float) -> ExtractResult:
         """正则 + 词表抽取。不依赖任何模型。
