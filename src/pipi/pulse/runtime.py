@@ -352,7 +352,7 @@ class PulseRuntime:
 
         # 惊吓余韵（60s 内）
         if self.loop._startle and sim - self.loop._startle_t < 60.0:
-            lines.append("- 你刚刚被吓了一跳，心还在突突，语气会发紧、发虚")
+            lines.append("- 你刚刚被吓了一跳，还没缓过来，语气会发紧、发虚")
 
         return ("你此刻真实的身心状态（你的语气、用词、内容必须和它一致，"
                 "不能和它矛盾）：\n" + "\n".join(lines))
